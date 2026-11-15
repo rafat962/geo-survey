@@ -1,0 +1,6 @@
+worker.js
+_worker.js
+wrangler.json
+.dev.vars
+.git
+.gitignore
