@@ -163,6 +163,7 @@
     let activeSegmentLayer = new GraphicsLayer({ id: "active-next-segment" });
     let highlightLayer = new GraphicsLayer({ id: "next-point-highlight" });
     let activeOrderField = FIELDS.order || "Sequence";
+    let activeStatusField = FIELDS.status || "status";
     let cachedFeatures = [];
     let nextPendingFeature = null;
     let activeFeature = null;
@@ -202,7 +203,7 @@
 
     const track = new Track({
       view: view,
-      goToLocationEnabled: true,
+      goToLocationEnabled: false,
       useHeadingEnabled: true
     });
     view.ui.add([fullscreen, track], "bottom-left");
@@ -230,7 +231,7 @@
     );
 
     // --- Symbology & Labeling ---
-    function createPointsRenderer() {
+    function createPointsRenderer(statusFieldName = activeStatusField) {
       const pendingSymbol = new SimpleMarkerSymbol({
         style: "circle",
         color: "#ea580c",
@@ -240,6 +241,13 @@
           width: 2.5
         }
       });
+
+      if (!statusFieldName) {
+        return new SimpleRenderer({
+          symbol: pendingSymbol,
+          label: "نقاط المسار"
+        });
+      }
 
       // Dim completed stops so they don't visually clash with nearby upcoming stops
       const completedSymbol = new SimpleMarkerSymbol({
@@ -253,7 +261,7 @@
       });
 
       return new UniqueValueRenderer({
-        field: FIELDS.status,
+        field: statusFieldName,
         defaultSymbol: pendingSymbol,
         defaultLabel: "قيد الانتظار",
         uniqueValueInfos: [
@@ -271,27 +279,35 @@
       });
     }
 
-    function createNumberedLabeling(orderFieldName = activeOrderField) {
-      return [
-        new LabelClass({
-          labelPlacement: "center-center",
-          where: `${FIELDS.status} <> '${STATUS_VALUES.completed}' OR ${FIELDS.status} IS NULL`,
-          labelExpressionInfo: {
-            expression: `$feature.${orderFieldName}`
-          },
-          symbol: {
-            type: "text",
-            color: "#ffffff",
-            haloColor: "rgba(15, 23, 42, 0.65)",
-            haloSize: "1.3px",
-            font: {
-              family: "Arial, sans-serif",
-              size: "12px",
-              weight: "bold"
-            }
+    function createNumberedLabeling(
+      orderFieldName = activeOrderField,
+      statusFieldName = activeStatusField
+    ) {
+      if (!orderFieldName) return [];
+
+      const labelClassConfig = {
+        labelPlacement: "center-center",
+        labelExpressionInfo: {
+          expression: `$feature.${orderFieldName}`
+        },
+        symbol: {
+          type: "text",
+          color: "#ffffff",
+          haloColor: "rgba(15, 23, 42, 0.65)",
+          haloSize: "1.3px",
+          font: {
+            family: "Arial, sans-serif",
+            size: "12px",
+            weight: "bold"
           }
-        })
-      ];
+        }
+      };
+
+      if (statusFieldName) {
+        labelClassConfig.where = `${statusFieldName} <> '${STATUS_VALUES.completed}' OR ${statusFieldName} IS NULL`;
+      }
+
+      return [new LabelClass(labelClassConfig)];
     }
 
     // --- Private Layer Token Registration (/api/esri-token) ---
@@ -311,22 +327,27 @@
     }
 
     async function registerEsriTokenFromServer() {
-      if (IS_LOCAL_FILE) return null;
+      if (IS_LOCAL_FILE) {
+        return { token: null, error: "تشغيل محلي بدون خادم التوثيق" };
+      }
 
       try {
         const res = await fetch("/api/esri-token", { cache: "no-store" });
         if (res.status === 401) {
           window.location.replace("/");
-          return null;
+          return { token: null, error: "انتهت الجلسة، يرجى إعادة تسجيل الدخول" };
         }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          console.warn("Esri token endpoint error:", data.error || res.status);
-          return null;
+          const errMsg = data.error || `HTTP ${res.status}`;
+          console.warn("Esri token endpoint error:", errMsg);
+          return { token: null, error: errMsg };
         }
 
         const accessToken = data.access_token || data.token;
-        if (!accessToken) return null;
+        if (!accessToken) {
+          return { token: null, error: "الخادم لم يُرجع رمز دخول صالح (access_token)" };
+        }
 
         const expiresInSec = Number(data.expires_in) || 3600;
         const expiresAtMs = Date.now() + expiresInSec * 1000;
@@ -354,10 +375,10 @@
           registerEsriTokenFromServer().catch(() => {});
         }, refreshDelayMs);
 
-        return accessToken;
+        return { token: accessToken, error: null };
       } catch (err) {
         console.warn("Failed to fetch /api/esri-token:", err);
-        return null;
+        return { token: null, error: err?.message || "تعذر الاتصال بـ /api/esri-token" };
       }
     }
 
@@ -376,6 +397,26 @@
       if (fallbackMatch) return fallbackMatch.name;
 
       return FIELDS.order || "Sequence";
+    }
+
+    function resolveStatusFieldName(fields) {
+      if (!Array.isArray(fields) || fields.length === 0) return null;
+      const target = (FIELDS.status || "status").toLowerCase();
+      const match = fields.find((f) => f.name?.toLowerCase() === target);
+      return match ? match.name : null;
+    }
+
+    function getStopStatusValue(attrs) {
+      if (!attrs) return null;
+      const candidates = [activeStatusField, FIELDS.status, "status"].filter(Boolean);
+      for (const name of candidates) {
+        if (attrs[name] !== undefined) return attrs[name];
+        const ciKey = Object.keys(attrs).find(
+          (k) => k.toLowerCase() === name.toLowerCase()
+        );
+        if (ciKey) return attrs[ciKey];
+      }
+      return null;
     }
 
     function getStopOrderValue(attrs) {
@@ -402,17 +443,81 @@
       return null;
     }
 
+    async function resolveFeatureLayerUrl(configuredUrl, token, preferredGeomType) {
+      const cleanUrl = (configuredUrl || "").trim().replace(/\/+$/, "");
+      if (!cleanUrl) return cleanUrl;
+
+      const match = cleanUrl.match(/^(.*\/(?:FeatureServer|MapServer))(?:\/(\d+))?$/i);
+      if (!match) return cleanUrl;
+
+      const serviceRoot = match[1];
+      const configuredLayerId = match[2] !== undefined ? Number(match[2]) : null;
+
+      try {
+        const metaUrl = new URL(serviceRoot);
+        metaUrl.searchParams.set("f", "json");
+        if (token) metaUrl.searchParams.set("token", token);
+
+        const res = await fetch(metaUrl.toString());
+        if (!res.ok) {
+          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+        }
+        const info = await res.json().catch(() => null);
+        const layers = Array.isArray(info?.layers) ? info.layers : [];
+        if (layers.length === 0) {
+          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+        }
+
+        const existingConfigured =
+          configuredLayerId !== null
+            ? layers.find((l) => Number(l.id) === configuredLayerId)
+            : null;
+
+        if (
+          existingConfigured &&
+          (!preferredGeomType ||
+            !existingConfigured.geometryType ||
+            existingConfigured.geometryType === preferredGeomType)
+        ) {
+          return `${serviceRoot}/${existingConfigured.id}`;
+        }
+
+        const geomMatch = preferredGeomType
+          ? layers.find((l) => l.geometryType === preferredGeomType)
+          : null;
+        const chosen = geomMatch || existingConfigured || layers[0];
+        return `${serviceRoot}/${chosen.id}`;
+      } catch (err) {
+        console.warn("Service metadata inspection skipped for", cleanUrl, err);
+        return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+      }
+    }
+
     async function initializeLayers(useDemo) {
       isDemoMode = useDemo;
       els.demoBadge.classList.toggle("visible", useDemo);
 
+      let tokenError = null;
+      let accessToken = null;
       if (!useDemo) {
-        await registerEsriTokenFromServer();
+        const tokenRes = await registerEsriTokenFromServer();
+        accessToken = tokenRes.token;
+        tokenError = tokenRes.error;
+        if (tokenError) {
+          showToast(`تعذر توليد توكن ArcGIS: ${tokenError}`, "error", 6500);
+        }
       }
 
-      if (ROUTE_LAYER_URL && ROUTE_LAYER_URL.trim() !== "") {
+      const [resolvedRouteUrl, resolvedPointsUrl] = useDemo
+        ? [ROUTE_LAYER_URL, POINTS_LAYER_URL]
+        : await Promise.all([
+            resolveFeatureLayerUrl(ROUTE_LAYER_URL, accessToken, "esriGeometryPolyline"),
+            resolveFeatureLayerUrl(POINTS_LAYER_URL, accessToken, "esriGeometryPoint")
+          ]);
+
+      if (resolvedRouteUrl && resolvedRouteUrl.trim() !== "") {
         routeLayer = new FeatureLayer({
-          url: ROUTE_LAYER_URL.trim(),
+          url: resolvedRouteUrl,
           popupEnabled: false,
           opacity: 0.25,
           renderer: new SimpleRenderer({
@@ -431,30 +536,47 @@
         pointsLayer = createDemoFeatureLayer();
       } else {
         pointsLayer = new FeatureLayer({
-          url: POINTS_LAYER_URL.trim(),
+          url: resolvedPointsUrl,
           outFields: ["*"],
           popupEnabled: false,
-          renderer: createPointsRenderer(),
-          labelingInfo: createNumberedLabeling(activeOrderField),
-          orderBy: [{ field: FIELDS.status, order: "ascending" }]
+          renderer: createPointsRenderer(activeStatusField)
         });
       }
 
       map.addMany([routeLayer, activeSegmentLayer, highlightLayer, pointsLayer]);
 
+      if (routeLayer && routeLayer.type === "feature") {
+        routeLayer.load().catch((err) => {
+          console.error("Failed to load route layer:", err);
+          showToast(
+            `تعذر تحميل طبقة المسار: ${err?.message || "تحقق من الرابط أو الصلاحيات"}`,
+            "error",
+            6000
+          );
+        });
+      }
+
       pointsLayer
         .load()
         .then(() => {
           activeOrderField = resolveOrderFieldName(pointsLayer.fields);
-          pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField);
+          activeStatusField = resolveStatusFieldName(pointsLayer.fields);
+          pointsLayer.renderer = createPointsRenderer(activeStatusField);
+          pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField, activeStatusField);
+          if (activeStatusField) {
+            pointsLayer.orderBy = [{ field: activeStatusField, order: "ascending" }];
+          }
           return loadAndSyncPoints(true);
         })
         .catch((err) => {
           console.error("Failed to load points layer:", err);
+          const reason = tokenError
+            ? `مشكلة توكن ArcGIS: ${tokenError}`
+            : err?.message || "تأكد من رابط الطبقة وصلاحيات الوصول";
           els.progressText.textContent = "تعذر تحميل طبقة النقاط";
-          els.nextTitle.textContent = "خطأ في الاتصال بالطبقة";
-          els.nextSubtitle.textContent = "تأكد من رابط الطبقة وصلاحيات الوصول";
-          showToast("فشل تحميل طبقة النقاط. تحقق من الرابط والإنترنت.", "error", 5000);
+          els.nextTitle.textContent = "خطأ في تحميل الطبقة";
+          els.nextSubtitle.textContent = reason;
+          showToast(`فشل تحميل طبقة النقاط: ${reason}`, "error", 7000);
         });
     }
 
@@ -573,7 +695,7 @@
     function updateProgressUI(features) {
       const total = features.length;
       const completed = features.filter((f) =>
-        isCompletedStatus(f.attributes?.[FIELDS.status])
+        isCompletedStatus(getStopStatusValue(f.attributes))
       ).length;
       const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -605,7 +727,7 @@
 
     function getLastCompletedFeature(sortedFeatures) {
       const completedList = sortedFeatures.filter((f) =>
-        isCompletedStatus(f.attributes?.[FIELDS.status])
+        isCompletedStatus(getStopStatusValue(f.attributes))
       );
       return completedList.length > 0
         ? completedList[completedList.length - 1]
@@ -659,8 +781,20 @@
     }
 
     function updateNextPendingPoint(sortedFeatures) {
+      if (!sortedFeatures || sortedFeatures.length === 0) {
+        nextPendingFeature = null;
+        els.nextBanner.classList.remove("all-done");
+        els.nextTitle.textContent = "لا توجد نقاط في الطبقة";
+        els.nextSubtitle.textContent = "تحقق من بيانات طبقة النقاط أو الصلاحيات";
+        els.btnZoomNext.hidden = true;
+        els.nextActionsRow.hidden = true;
+        activeSegmentLayer.removeAll();
+        clearNextPointHalo();
+        return;
+      }
+
       nextPendingFeature =
-        sortedFeatures.find((f) => !isCompletedStatus(f.attributes?.[FIELDS.status])) || null;
+        sortedFeatures.find((f) => !isCompletedStatus(getStopStatusValue(f.attributes))) || null;
 
       if (!nextPendingFeature) {
         els.nextBanner.classList.add("all-done");
@@ -900,7 +1034,7 @@
 
       const attrs = fullGraphic.attributes || {};
       const orderVal = getStopOrderValue(attrs) ?? "--";
-      const completed = isCompletedStatus(attrs[FIELDS.status]);
+      const completed = isCompletedStatus(getStopStatusValue(attrs));
 
       els.sheetTitle.textContent = `محطة رقم #${orderVal}`;
       els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
@@ -1354,12 +1488,13 @@
         const hasBaseField = FIELDS.hasBase || "has_base";
         const notesField = FIELDS.notesObstacles || "notes_obstacles";
 
+        const statusField = activeStatusField || FIELDS.status || "status";
         updatedGraphic.attributes[oidField] = activeFeature.attributes[oidField];
         updatedGraphic.attributes[dateField] = localDateStrToEpoch(handoverDateStr);
         updatedGraphic.attributes[decisionField] = committeeDecision;
         updatedGraphic.attributes[hasBaseField] = hasBase;
         updatedGraphic.attributes[notesField] = notesObstacles;
-        updatedGraphic.attributes[FIELDS.status] = STATUS_VALUES.completed;
+        updatedGraphic.attributes[statusField] = STATUS_VALUES.completed;
 
         const editResult = await pointsLayer.applyEdits({
           updateFeatures: [updatedGraphic]
