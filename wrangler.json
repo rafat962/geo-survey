@@ -4,7 +4,7 @@
     "main": "worker.js",
     "workers_dev": true,
     "vars": {
-        "AUTH_USERS": "{\"Heba\":\"1234\"}"
+        "AUTH_USERS": "{\"Heba\":\"1234\",\"makkah\":\"makkah123\"}"
     },
     "assets": {
         "directory": ".",
