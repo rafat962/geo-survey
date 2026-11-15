@@ -53,13 +53,13 @@ body {
 /* Top HUD (Progress + Next Point Banner) */
 .top-hud {
   position: fixed;
-  top: calc(12px + var(--safe-top));
-  right: 12px;
-  left: 12px;
+  top: calc(10px + var(--safe-top));
+  right: 10px;
+  left: 10px;
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   max-width: 520px;
   margin: 0 auto;
   pointer-events: none;
@@ -72,7 +72,7 @@ body {
   border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  padding: 10px 14px;
+  padding: 8px 12px;
   pointer-events: auto;
 }
 
@@ -169,11 +169,11 @@ body {
 .next-banner {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   background: linear-gradient(135deg, #0f172a, #1e293b);
   color: #ffffff;
   border: none;
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .next-banner.all-done {
@@ -286,12 +286,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 46px;
-  padding: 0 12px;
+  min-height: 40px;
+  padding: 0 10px;
   border: none;
   border-radius: 12px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 800;
   text-decoration: none;
   cursor: pointer;
@@ -312,32 +312,33 @@ body {
   color: #ffffff;
 }
 
-/* Floating Map Action Buttons */
+/* Floating Map Action Buttons (Bottom-Right) */
 .fab-stack {
   position: fixed;
-  right: 14px;
-  bottom: calc(24px + var(--safe-bottom));
+  right: 12px;
+  bottom: calc(32px + var(--safe-bottom));
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .fab-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-width: 48px;
-  min-height: 48px;
-  padding: 0 14px;
+  gap: 7px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 13px;
   border-radius: 999px;
   border: 1px solid rgba(226, 232, 240, 0.95);
   background: rgba(255, 255, 255, 0.96);
   color: var(--text-primary);
   box-shadow: var(--shadow-lg);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease;
@@ -349,26 +350,42 @@ body {
 }
 
 .fab-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
   flex-shrink: 0;
 }
 
-/* Esri default UI widgets */
+/* Esri default UI widgets (Bottom-Left: Location + Fullscreen) */
 .esri-ui-bottom-left {
-  bottom: calc(20px + var(--safe-bottom)) !important;
+  bottom: calc(32px + var(--safe-bottom)) !important;
   left: 12px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+}
+
+.esri-ui-bottom-left .esri-component {
+  margin: 0 !important;
 }
 
 .esri-ui-bottom-left .esri-widget {
-  border-radius: 12px;
+  border-radius: 999px;
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(226, 232, 240, 0.95);
 }
 
 .esri-widget--button {
   width: 44px !important;
   height: 44px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+}
+
+.esri-attribution {
+  font-size: 10px !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(4px);
 }
 
 /* Toast Notification */

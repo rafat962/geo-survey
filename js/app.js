@@ -129,6 +129,8 @@
       btnOpenNextForm: document.getElementById("btnOpenNextForm"),
       btnGoogleMaps: document.getElementById("btnGoogleMaps"),
       btnMyLocation: document.getElementById("btnMyLocation"),
+      btnToggleBasemap: document.getElementById("btnToggleBasemap"),
+      basemapToggleText: document.getElementById("basemapToggleText"),
       btnZoomAll: document.getElementById("btnZoomAll"),
       demoBadge: document.getElementById("demoBadge"),
       setupModal: document.getElementById("setupModal"),
@@ -170,6 +172,9 @@
     let selectedPhotos = [];
     let photoIdCounter = 0;
     let isDemoMode = false;
+    let isSatelliteBasemap =
+      String(MAP_CONFIG.basemap || "").includes("hybrid") ||
+      String(MAP_CONFIG.basemap || "").includes("satellite");
     let pulseIntervalId = null;
     let initialZoomDone = false;
     let toastTimer = null;
@@ -184,18 +189,21 @@
       map: map,
       center: MAP_CONFIG.defaultCenter,
       zoom: MAP_CONFIG.defaultZoom,
+      ui: {
+        components: ["attribution"]
+      },
       popup: {
         autoOpenEnabled: false
       },
       padding: {
-        top: 195,
-        bottom: 40,
+        top: 170,
+        bottom: 48,
         left: 16,
         right: 16
       }
     });
 
-    // --- Live GPS Track & Fullscreen Widgets ---
+    // --- Live GPS Track (background) & Bottom-Left Controls (Location + Fullscreen) ---
     const fullscreen = new Fullscreen({
       view: view,
       element: document.documentElement
@@ -206,7 +214,7 @@
       goToLocationEnabled: false,
       useHeadingEnabled: true
     });
-    view.ui.add([fullscreen, track], "bottom-left");
+    view.ui.add([fullscreen, els.btnMyLocation], "bottom-left");
 
     view.when(() => {
       try {
@@ -231,11 +239,21 @@
     );
 
     // --- Symbology & Labeling ---
+    function getRouteLineSymbol(satelliteMode = isSatelliteBasemap) {
+      return new SimpleLineSymbol({
+        color: satelliteMode ? [125, 211, 252, 0.9] : [37, 99, 235, 0.85],
+        width: 4,
+        style: "solid",
+        cap: "round",
+        join: "round"
+      });
+    }
+
     function createPointsRenderer(statusFieldName = activeStatusField) {
       const pendingSymbol = new SimpleMarkerSymbol({
         style: "circle",
         color: "#ea580c",
-        size: "28px",
+        size: "24px",
         outline: {
           color: "#ffffff",
           width: 2.5
@@ -252,10 +270,10 @@
       // Dim completed stops so they don't visually clash with nearby upcoming stops
       const completedSymbol = new SimpleMarkerSymbol({
         style: "circle",
-        color: [22, 163, 74, 0.6],
-        size: "16px",
+        color: [22, 163, 74, 0.65],
+        size: "14px",
         outline: {
-          color: [255, 255, 255, 0.65],
+          color: [255, 255, 255, 0.75],
           width: 1.5
         }
       });
@@ -596,21 +614,15 @@
           url: resolvedRouteUrl,
           outFields: ["*"],
           popupEnabled: false,
-          opacity: 0.78,
+          opacity: 0.85,
           minScale: 0,
           maxScale: 0,
           renderer: new SimpleRenderer({
-            symbol: new SimpleLineSymbol({
-              color: [224, 242, 254, 0.85],
-              width: 4,
-              style: "solid",
-              cap: "round",
-              join: "round"
-            })
+            symbol: getRouteLineSymbol()
           })
         });
       } else {
-        routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.65 });
+        routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.8 });
       }
 
       if (useDemo) {
@@ -1069,6 +1081,25 @@
         }
       }
     });
+
+    if (els.btnToggleBasemap) {
+      els.btnToggleBasemap.addEventListener("click", () => {
+        isSatelliteBasemap = !isSatelliteBasemap;
+        map.basemap = isSatelliteBasemap
+          ? MAP_CONFIG.satelliteBasemap || "hybrid"
+          : MAP_CONFIG.basemap || "streets-navigation-vector";
+
+        if (els.basemapToggleText) {
+          els.basemapToggleText.textContent = isSatelliteBasemap ? "خريطة شوارع" : "قمر صناعي";
+        }
+
+        if (routeLayer && routeLayer.type === "feature") {
+          routeLayer.renderer = new SimpleRenderer({
+            symbol: getRouteLineSymbol(isSatelliteBasemap)
+          });
+        }
+      });
+    }
 
     els.btnZoomAll.addEventListener("click", zoomToAllPoints);
 
