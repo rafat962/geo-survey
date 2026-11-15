@@ -122,34 +122,95 @@
     </div>
 
     <form id="pointForm" class="sheet-body" novalidate>
-      <div id="dynamicFieldsContainer"></div>
+      <!-- 1. تاريخ الاستلام الفعلي -->
+      <div class="form-field">
+        <label class="form-label" for="fieldHandoverDate">
+          تاريخ الاستلام الفعلي <span class="required-mark">*</span>
+        </label>
+        <input
+          id="fieldHandoverDate"
+          name="actual_handover_date"
+          type="date"
+          class="form-control"
+          required
+        />
+      </div>
+
+      <!-- 2. قرار لجنة التسليم -->
+      <div class="form-field">
+        <label class="form-label" for="fieldCommitteeDecision">
+          قرار لجنة التسليم <span class="required-mark">*</span>
+        </label>
+        <select
+          id="fieldCommitteeDecision"
+          name="committee_decision"
+          class="form-control"
+          required
+        >
+          <option value="" disabled selected>-- اختر قرار اللجنة --</option>
+          <option value="استلام الموقع">استلام الموقع</option>
+          <option value="استلام الموقع مع ملاحظات">استلام الموقع مع ملاحظات</option>
+          <option value="رفض استلام الموقع لوجود عائق يمنع التنفيذ">رفض استلام الموقع لوجود عائق يمنع التنفيذ</option>
+        </select>
+      </div>
+
+      <!-- 3. يوجد قاعدة بالموقع -->
+      <div class="form-field">
+        <label class="form-label" for="fieldHasBase">
+          يوجد قاعدة بالموقع <span class="required-mark">*</span>
+        </label>
+        <select
+          id="fieldHasBase"
+          name="has_base"
+          class="form-control"
+          required
+        >
+          <option value="" disabled selected>-- اختر --</option>
+          <option value="نعم">نعم</option>
+          <option value="لا">لا</option>
+        </select>
+      </div>
+
+      <!-- 4. الملاحظات / المعوقات -->
+      <div class="form-field">
+        <label class="form-label" for="fieldNotesObstacles">
+          الملاحظات / المعوقات
+          <span id="notesRequiredBadge" class="required-badge" hidden>مطلوب</span>
+        </label>
+        <textarea
+          id="fieldNotesObstacles"
+          name="notes_obstacles"
+          rows="3"
+          class="form-control"
+          placeholder="أدخل الملاحظات أو وصف المعوقات..."
+        ></textarea>
+      </div>
 
       <div id="existingPhotosSection" class="form-field" hidden>
         <label class="form-label">الصور المرفقة سابقاً</label>
         <div id="existingPhotosList" class="existing-attachments"></div>
       </div>
 
+      <!-- Multi-Photo Camera Capture & Queue -->
       <div class="form-field">
-        <label class="form-label">إرفاق صورة ميدانية (اختياري)</label>
+        <div class="photo-header-row">
+          <label class="form-label">صور الموقع (متعدد)</label>
+          <span id="photoCountLabel" class="photo-count-label" hidden>0 صور</span>
+        </div>
         <div class="photo-box">
           <input
             id="photoInput"
             type="file"
             accept="image/*"
             capture="environment"
+            multiple
             hidden
           />
           <button id="btnPickPhoto" class="btn-camera" type="button">
-            📷 التقاط صورة بالكاميرا أو اختيار ملف
+            📷 إضافة صورة أخرى / التقاط صورة
           </button>
 
-          <div id="photoPreviewWrap" class="photo-preview-wrap">
-            <img id="photoPreviewImg" class="photo-preview-img" alt="معاينة الصورة" />
-            <div class="photo-meta">
-              <span id="photoSizeInfo">جاهزة للرفع</span>
-              <button id="btnRemovePhoto" class="btn-remove-photo" type="button">حذف</button>
-            </div>
-          </div>
+          <div id="photoGallery" class="photo-gallery" hidden></div>
         </div>
       </div>
 

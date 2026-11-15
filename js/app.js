@@ -128,15 +128,17 @@
       sheetStatusBadge: document.getElementById("sheetStatusBadge"),
       btnCloseSheet: document.getElementById("btnCloseSheet"),
       pointForm: document.getElementById("pointForm"),
-      dynamicFieldsContainer: document.getElementById("dynamicFieldsContainer"),
+      fieldHandoverDate: document.getElementById("fieldHandoverDate"),
+      fieldCommitteeDecision: document.getElementById("fieldCommitteeDecision"),
+      fieldHasBase: document.getElementById("fieldHasBase"),
+      fieldNotesObstacles: document.getElementById("fieldNotesObstacles"),
+      notesRequiredBadge: document.getElementById("notesRequiredBadge"),
       existingPhotosSection: document.getElementById("existingPhotosSection"),
       existingPhotosList: document.getElementById("existingPhotosList"),
       photoInput: document.getElementById("photoInput"),
       btnPickPhoto: document.getElementById("btnPickPhoto"),
-      photoPreviewWrap: document.getElementById("photoPreviewWrap"),
-      photoPreviewImg: document.getElementById("photoPreviewImg"),
-      photoSizeInfo: document.getElementById("photoSizeInfo"),
-      btnRemovePhoto: document.getElementById("btnRemovePhoto"),
+      photoCountLabel: document.getElementById("photoCountLabel"),
+      photoGallery: document.getElementById("photoGallery"),
       formError: document.getElementById("formError"),
       btnSubmitForm: document.getElementById("btnSubmitForm"),
       submitSpinner: document.getElementById("submitSpinner"),
@@ -150,8 +152,8 @@
     let cachedFeatures = [];
     let nextPendingFeature = null;
     let activeFeature = null;
-    let compressedPhotoBlob = null;
-    let compressedPhotoFilename = "field_photo.jpg";
+    let selectedPhotos = [];
+    let photoIdCounter = 0;
     let isDemoMode = false;
     let pulseIntervalId = null;
     let initialZoomDone = false;
@@ -306,13 +308,28 @@
     function createDemoFeatureLayer() {
       const baseLat = 24.7136;
       const baseLng = 46.6753;
+      const nowMs = Date.now();
       const samplePoints = [
-        { order: 1, status: STATUS_VALUES.completed, notes: "تم فحص المحول الرئيسي", site: "حي العليا - محطة 1" },
-        { order: 2, status: STATUS_VALUES.completed, notes: "قراءة العداد مطابقة", site: "طريق الملك فهد" },
-        { order: 3, status: STATUS_VALUES.pending, notes: "", site: "شارع التحلية - نقطة 3" },
-        { order: 4, status: STATUS_VALUES.pending, notes: "مطلوب تصوير اللوحة", site: "حي السليمانية - نقطة 4" },
-        { order: 5, status: STATUS_VALUES.pending, notes: "", site: "حي الورود - نقطة 5" },
-        { order: 6, status: STATUS_VALUES.pending, notes: "", site: "طريق العروبة - نقطة 6" }
+        {
+          order: 1,
+          status: STATUS_VALUES.completed,
+          date: nowMs - 86400000,
+          decision: "استلام الموقع",
+          hasBase: "نعم",
+          notes: "تم الاستلام والموقع جاهز"
+        },
+        {
+          order: 2,
+          status: STATUS_VALUES.completed,
+          date: nowMs - 86400000,
+          decision: "استلام الموقع مع ملاحظات",
+          hasBase: "نعم",
+          notes: "يحتاج تسوية بسيطة بالرصيف"
+        },
+        { order: 3, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { order: 4, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { order: 5, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { order: 6, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" }
       ];
 
       const sourceGraphics = samplePoints.map((pt, idx) => {
@@ -327,8 +344,10 @@
             OBJECTID: idx + 1,
             [FIELDS.order]: pt.order,
             [FIELDS.status]: pt.status,
-            [FIELDS.notes]: pt.notes,
-            site_name: pt.site
+            [FIELDS.actualHandoverDate]: pt.date,
+            [FIELDS.committeeDecision]: pt.decision,
+            [FIELDS.hasBase]: pt.hasBase,
+            [FIELDS.notesObstacles]: pt.notes
           }
         });
       });
@@ -341,22 +360,11 @@
         fields: [
           { name: "OBJECTID", alias: "OBJECTID", type: "oid" },
           { name: FIELDS.order, alias: "رقم النقطة", type: "integer", editable: false },
-          {
-            name: FIELDS.status,
-            alias: "الحالة",
-            type: "string",
-            editable: true,
-            domain: {
-              type: "coded-value",
-              name: "StatusDomain",
-              codedValues: [
-                { name: "قيد الانتظار (Pending)", code: STATUS_VALUES.pending },
-                { name: "مكتملة (Completed)", code: STATUS_VALUES.completed }
-              ]
-            }
-          },
-          { name: "site_name", alias: "اسم الموقع", type: "string", length: 100, editable: true },
-          { name: FIELDS.notes, alias: "ملاحظات الميدان", type: "string", length: 500, editable: true }
+          { name: FIELDS.status, alias: "الحالة", type: "string", editable: true },
+          { name: FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
+          { name: FIELDS.committeeDecision, alias: "قرار لجنة التسليم", type: "string", length: 150, editable: true },
+          { name: FIELDS.hasBase, alias: "يوجد قاعدة بالموقع", type: "string", length: 20, editable: true },
+          { name: FIELDS.notesObstacles, alias: "الملاحظات / المعوقات", type: "string", length: 500, editable: true }
         ],
         popupEnabled: false,
         renderer: createPointsRenderer(),
@@ -584,7 +592,51 @@
       }
     });
 
-    // --- Bottom Sheet & Dynamic Form Generation ---
+    // --- Bottom Sheet Form (Exact 4 Handover Fields) ---
+    const DECISIONS_REQUIRING_NOTES = new Set([
+      "استلام الموقع مع ملاحظات",
+      "رفض استلام الموقع لوجود عائق يمنع التنفيذ"
+    ]);
+
+    function getTodayLocalDateStr() {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function epochToLocalDateStr(epochVal) {
+      if (epochVal === null || epochVal === undefined || epochVal === "") return "";
+      const d = new Date(epochVal);
+      if (Number.isNaN(d.getTime())) return "";
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function localDateStrToEpoch(dateStr) {
+      if (!dateStr) return null;
+      const parts = String(dateStr).split("-");
+      if (parts.length !== 3) return null;
+      const year = Number(parts[0]);
+      const month = Number(parts[1]);
+      const day = Number(parts[2]);
+      if (!year || !month || !day) return null;
+      // Local noon prevents UTC offset shifts from changing the calendar date
+      return new Date(year, month - 1, day, 12, 0, 0).getTime();
+    }
+
+    function syncNotesRequirement() {
+      const decision = els.fieldCommitteeDecision.value;
+      const needsNotes = DECISIONS_REQUIRING_NOTES.has(decision);
+      els.fieldNotesObstacles.required = needsNotes;
+      els.notesRequiredBadge.hidden = !needsNotes;
+    }
+
+    els.fieldCommitteeDecision.addEventListener("change", syncNotesRequirement);
+
     function openBottomSheet(graphic) {
       const oidField = pointsLayer.objectIdField || "OBJECTID";
       const oid = graphic.attributes?.[oidField];
@@ -603,7 +655,7 @@
       els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
       els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
 
-      renderDynamicFormFields(attrs);
+      populateFixedFormFields(attrs);
       loadExistingAttachments(oid);
 
       els.sheetBackdrop.classList.add("open");
@@ -621,135 +673,23 @@
     els.btnCloseSheet.addEventListener("click", closeBottomSheet);
     els.sheetBackdrop.addEventListener("click", closeBottomSheet);
 
-    function renderDynamicFormFields(attrs) {
-      els.dynamicFieldsContainer.innerHTML = "";
-      const fields = Array.isArray(pointsLayer?.fields) ? pointsLayer.fields : [];
+    function populateFixedFormFields(attrs) {
+      const dateField = FIELDS.actualHandoverDate || "actual_handover_date";
+      const decisionField = FIELDS.committeeDecision || "committee_decision";
+      const hasBaseField = FIELDS.hasBase || "has_base";
+      const notesField = FIELDS.notesObstacles || "notes_obstacles";
 
-      const editableFields = fields.filter((field) => {
-        if (!field || !field.name) return false;
-        if (field.editable === false) return false;
-        if (
-          field.type === "oid" ||
-          field.type === "global-id" ||
-          field.type === "geometry"
-        ) {
-          return false;
-        }
-        if (SYSTEM_FIELD_PATTERN.test(field.name)) return false;
-        if (field.name === FIELDS.order) return false;
-        return true;
-      });
+      const savedDateStr = epochToLocalDateStr(attrs[dateField]);
+      els.fieldHandoverDate.value = savedDateStr || getTodayLocalDateStr();
 
-      if (editableFields.length === 0) {
-        els.dynamicFieldsContainer.appendChild(
-          buildFieldElement(
-            { name: FIELDS.status, alias: "الحالة", type: "string" },
-            attrs[FIELDS.status] ?? STATUS_VALUES.completed
-          )
-        );
-        els.dynamicFieldsContainer.appendChild(
-          buildFieldElement(
-            { name: FIELDS.notes, alias: "الملاحظات", type: "string", length: 500 },
-            attrs[FIELDS.notes] ?? ""
-          )
-        );
-        return;
-      }
+      const savedDecision = attrs[decisionField];
+      els.fieldCommitteeDecision.value = savedDecision ? String(savedDecision) : "";
 
-      editableFields.forEach((field) => {
-        const value = attrs[field.name];
-        els.dynamicFieldsContainer.appendChild(buildFieldElement(field, value));
-      });
-    }
+      const savedHasBase = attrs[hasBaseField];
+      els.fieldHasBase.value = savedHasBase ? String(savedHasBase) : "";
 
-    function buildFieldElement(field, rawValue) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "form-field";
-
-      const label = document.createElement("label");
-      label.className = "form-label";
-      const fieldId = `field_${field.name}`;
-      label.setAttribute("for", fieldId);
-      label.textContent = getArabicFieldLabel(field);
-      wrapper.appendChild(label);
-
-      let control;
-
-      if (field.domain && field.domain.type === "coded-value" && Array.isArray(field.domain.codedValues)) {
-        control = document.createElement("select");
-        control.className = "form-control";
-        field.domain.codedValues.forEach((cv) => {
-          const opt = document.createElement("option");
-          opt.value = cv.code;
-          opt.textContent = cv.name;
-          control.appendChild(opt);
-        });
-        if (field.name === FIELDS.status) {
-          control.value = STATUS_VALUES.completed;
-        } else if (rawValue !== null && rawValue !== undefined) {
-          control.value = String(rawValue);
-        }
-      } else if (field.name === FIELDS.status) {
-        control = document.createElement("select");
-        control.className = "form-control";
-        [
-          { code: STATUS_VALUES.completed, label: "مكتملة (Completed)" },
-          { code: STATUS_VALUES.pending, label: "قيد الانتظار (Pending)" }
-        ].forEach((item) => {
-          const opt = document.createElement("option");
-          opt.value = item.code;
-          opt.textContent = item.label;
-          control.appendChild(opt);
-        });
-        control.value = STATUS_VALUES.completed;
-      } else if (field.type === "date") {
-        control = document.createElement("input");
-        control.type = "date";
-        control.className = "form-control";
-        if (rawValue) {
-          const d = new Date(rawValue);
-          if (!Number.isNaN(d.getTime())) {
-            control.value = d.toISOString().split("T")[0];
-          }
-        }
-      } else if (
-        field.type === "integer" ||
-        field.type === "small-integer" ||
-        field.type === "double" ||
-        field.type === "single"
-      ) {
-        control = document.createElement("input");
-        control.type = "number";
-        control.step = field.type === "double" || field.type === "single" ? "any" : "1";
-        control.inputMode = "decimal";
-        control.className = "form-control";
-        if (rawValue !== null && rawValue !== undefined) {
-          control.value = String(rawValue);
-        }
-      } else if (field.name === FIELDS.notes || (field.length && field.length > 120)) {
-        control = document.createElement("textarea");
-        control.className = "form-control";
-        control.placeholder = "أدخل الملاحظات الميدانية هنا...";
-        control.value = rawValue ?? "";
-      } else {
-        control = document.createElement("input");
-        control.type = "text";
-        control.className = "form-control";
-        control.value = rawValue ?? "";
-      }
-
-      control.id = fieldId;
-      control.name = field.name;
-      control.dataset.fieldType = field.type || "string";
-      wrapper.appendChild(control);
-
-      return wrapper;
-    }
-
-    function getArabicFieldLabel(field) {
-      if (field.name === FIELDS.status) return "الحالة (سيتم تعيينها كمكتملة تلقائياً عند الحفظ)";
-      if (field.name === FIELDS.notes) return "الملاحظات";
-      return field.alias || field.name;
+      els.fieldNotesObstacles.value = attrs[notesField] ?? "";
+      syncNotesRequirement();
     }
 
     async function loadExistingAttachments(objectId) {
@@ -789,66 +729,125 @@
       }
     }
 
-    // --- Photo Selection, Date/Location Watermark & Canvas Compression ---
+    // --- Multi-Photo Capture, Watermark, Compression & Gallery ---
     els.btnPickPhoto.addEventListener("click", () => {
       els.photoInput.click();
     });
 
-    els.btnRemovePhoto.addEventListener("click", resetPhotoState);
-
     els.photoInput.addEventListener("change", async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const files = Array.from(e.target.files || []);
+      // Reset input immediately so mobile camera can capture another photo next time
+      els.photoInput.value = "";
+      if (files.length === 0) return;
 
       hideFormError();
       const watermarkEnabled =
         typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.enabled;
 
+      const origBtnText = els.btnPickPhoto.textContent;
+      els.btnPickPhoto.disabled = true;
+      els.btnPickPhoto.textContent = "جاري معالجة الصور...";
+
       try {
-        if (IMAGE_COMPRESSION.enabled || watermarkEnabled) {
-          els.photoSizeInfo.textContent = "جاري معالجة الصورة وختم الموقع...";
-          const watermarkInfo = watermarkEnabled
-            ? await buildWatermarkInfo()
-            : null;
+        const watermarkInfo = watermarkEnabled ? await buildWatermarkInfo() : null;
 
-          const processed = await processPhotoOnCanvas(file, {
-            maxWidth: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.maxWidth : Infinity,
-            quality: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.quality : 0.92,
-            watermarkInfo
-          });
-
-          compressedPhotoBlob = processed.blob;
-          compressedPhotoFilename = buildJpgFilename(file.name);
-          els.photoPreviewImg.src = processed.dataUrl;
-          els.photoSizeInfo.textContent = IMAGE_COMPRESSION.enabled
-            ? `تم الضغط والختم: ${formatBytes(processed.compressedSize)} (بدلاً من ${formatBytes(processed.originalSize)})`
-            : `تم ختم التاريخ والموقع (${formatBytes(processed.compressedSize)})`;
-        } else {
-          compressedPhotoBlob = file;
-          compressedPhotoFilename = file.name || "field_photo.jpg";
-          els.photoPreviewImg.src = URL.createObjectURL(file);
-          els.photoSizeInfo.textContent = `الحجم: ${formatBytes(file.size)}`;
+        for (const file of files) {
+          if (IMAGE_COMPRESSION.enabled || watermarkEnabled) {
+            const processed = await processPhotoOnCanvas(file, {
+              maxWidth: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.maxWidth : Infinity,
+              quality: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.quality : 0.92,
+              watermarkInfo
+            });
+            selectedPhotos.push({
+              id: ++photoIdCounter,
+              blob: processed.blob,
+              dataUrl: processed.dataUrl,
+              filename: buildJpgFilename(file.name, photoIdCounter),
+              size: processed.compressedSize
+            });
+          } else {
+            selectedPhotos.push({
+              id: ++photoIdCounter,
+              blob: file,
+              dataUrl: URL.createObjectURL(file),
+              filename: file.name || `field_photo_${photoIdCounter}.jpg`,
+              size: file.size,
+              isObjectUrl: true
+            });
+          }
         }
 
-        els.photoPreviewWrap.classList.add("visible");
+        renderPhotoGallery();
       } catch (err) {
         console.error("Image processing error:", err);
-        showFormError("تعذر معالجة الصورة المختارة. يرجى المحاولة بصورة أخرى.");
-        resetPhotoState();
+        showFormError("تعذر معالجة إحدى الصور المختارة. يرجى المحاولة مرة أخرى.");
+      } finally {
+        els.btnPickPhoto.disabled = false;
+        els.btnPickPhoto.textContent = origBtnText;
       }
     });
 
-    function resetPhotoState() {
-      compressedPhotoBlob = null;
-      compressedPhotoFilename = "field_photo.jpg";
-      els.photoInput.value = "";
-      els.photoPreviewImg.src = "";
-      els.photoPreviewWrap.classList.remove("visible");
+    function renderPhotoGallery() {
+      els.photoGallery.innerHTML = "";
+      const count = selectedPhotos.length;
+
+      els.photoGallery.hidden = count === 0;
+      els.photoCountLabel.hidden = count === 0;
+      els.photoCountLabel.textContent =
+        count === 1 ? "صورة واحدة" : count === 2 ? "صورتان" : `${count} صور`;
+
+      selectedPhotos.forEach((photo) => {
+        const card = document.createElement("div");
+        card.className = "photo-thumb-card";
+
+        const img = document.createElement("img");
+        img.src = photo.dataUrl;
+        img.alt = photo.filename;
+        img.className = "photo-thumb-img";
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "photo-thumb-remove";
+        removeBtn.setAttribute("aria-label", "حذف الصورة");
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", () => {
+          removeQueuedPhoto(photo.id);
+        });
+
+        const sizeBadge = document.createElement("div");
+        sizeBadge.className = "photo-thumb-size";
+        sizeBadge.textContent = formatBytes(photo.size);
+
+        card.appendChild(img);
+        card.appendChild(removeBtn);
+        card.appendChild(sizeBadge);
+        els.photoGallery.appendChild(card);
+      });
     }
 
-    function buildJpgFilename(originalName) {
+    function removeQueuedPhoto(photoId) {
+      const target = selectedPhotos.find((p) => p.id === photoId);
+      if (target?.isObjectUrl && target.dataUrl) {
+        URL.revokeObjectURL(target.dataUrl);
+      }
+      selectedPhotos = selectedPhotos.filter((p) => p.id !== photoId);
+      renderPhotoGallery();
+    }
+
+    function resetPhotoState() {
+      selectedPhotos.forEach((p) => {
+        if (p.isObjectUrl && p.dataUrl) {
+          URL.revokeObjectURL(p.dataUrl);
+        }
+      });
+      selectedPhotos = [];
+      els.photoInput.value = "";
+      renderPhotoGallery();
+    }
+
+    function buildJpgFilename(originalName, seq) {
       const base = (originalName || "field_photo").replace(/\.[^/.]+$/, "");
-      return `${base}.jpg`;
+      return `${base}_${seq}.jpg`;
     }
 
     function extractLatLng(geom) {
@@ -1057,42 +1056,59 @@
       return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     }
 
-    // --- Form Submission (applyEdits + addAttachment) ---
+    // --- Form Submission (applyEdits + Sequential Multi-Attachment Upload) ---
     els.pointForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!activeFeature || !pointsLayer) return;
 
       hideFormError();
+
+      const handoverDateStr = els.fieldHandoverDate.value;
+      const committeeDecision = els.fieldCommitteeDecision.value;
+      const hasBase = els.fieldHasBase.value;
+      const notesObstacles = els.fieldNotesObstacles.value.trim();
+
+      if (!handoverDateStr) {
+        showFormError("يرجى تحديد تاريخ الاستلام الفعلي.");
+        els.fieldHandoverDate.focus();
+        return;
+      }
+
+      if (!committeeDecision) {
+        showFormError("يرجى اختيار قرار لجنة التسليم.");
+        els.fieldCommitteeDecision.focus();
+        return;
+      }
+
+      if (!hasBase) {
+        showFormError("يرجى تحديد ما إذا كان يوجد قاعدة بالموقع أم لا.");
+        els.fieldHasBase.focus();
+        return;
+      }
+
+      if (DECISIONS_REQUIRING_NOTES.has(committeeDecision) && !notesObstacles) {
+        showFormError("يرجى إدخال الملاحظات / المعوقات لأن قرار اللجنة يتطلب توضيحها.");
+        els.fieldNotesObstacles.focus();
+        return;
+      }
+
       setSubmittingState(true, "جاري حفظ البيانات...");
 
       try {
         const oidField = pointsLayer.objectIdField || "OBJECTID";
         const updatedGraphic = activeFeature.clone();
 
-        const controls = els.dynamicFieldsContainer.querySelectorAll("[name]");
-        controls.forEach((ctrl) => {
-          const fieldName = ctrl.name;
-          const fieldType = ctrl.dataset.fieldType;
-          let val = ctrl.value;
+        const dateField = FIELDS.actualHandoverDate || "actual_handover_date";
+        const decisionField = FIELDS.committeeDecision || "committee_decision";
+        const hasBaseField = FIELDS.hasBase || "has_base";
+        const notesField = FIELDS.notesObstacles || "notes_obstacles";
 
-          if (
-            fieldType === "integer" ||
-            fieldType === "small-integer" ||
-            fieldType === "double" ||
-            fieldType === "single"
-          ) {
-            val = val === "" ? null : Number(val);
-          } else if (fieldType === "date") {
-            val = val ? new Date(val).getTime() : null;
-          }
-
-          updatedGraphic.attributes[fieldName] = val;
-        });
-
-        if (!updatedGraphic.attributes[FIELDS.status]) {
-          updatedGraphic.attributes[FIELDS.status] = STATUS_VALUES.completed;
-        }
         updatedGraphic.attributes[oidField] = activeFeature.attributes[oidField];
+        updatedGraphic.attributes[dateField] = localDateStrToEpoch(handoverDateStr);
+        updatedGraphic.attributes[decisionField] = committeeDecision;
+        updatedGraphic.attributes[hasBaseField] = hasBase;
+        updatedGraphic.attributes[notesField] = notesObstacles;
+        updatedGraphic.attributes[FIELDS.status] = STATUS_VALUES.completed;
 
         const editResult = await pointsLayer.applyEdits({
           updateFeatures: [updatedGraphic]
@@ -1105,22 +1121,34 @@
           );
         }
 
-        if (compressedPhotoBlob) {
+        // Upload all queued photos sequentially
+        const photosQueue = [...selectedPhotos];
+        const totalPhotos = photosQueue.length;
+
+        for (let i = 0; i < totalPhotos; i++) {
+          const photo = photosQueue[i];
+          setSubmittingState(
+            true,
+            `جاري رفع صورة ${i + 1} من ${totalPhotos}...`
+          );
+
           if (isDemoMode) {
-            setSubmittingState(true, "جاري رفع الصورة (تجريبي)...");
-            await new Promise((r) => setTimeout(r, 450));
+            await new Promise((r) => setTimeout(r, 350));
           } else {
-            setSubmittingState(true, "جاري رفع الصورة...");
             const formData = new FormData();
-            formData.append("attachment", compressedPhotoBlob, compressedPhotoFilename);
+            formData.append("attachment", photo.blob, photo.filename);
 
             const attachRes = await pointsLayer.addAttachment(updatedGraphic, formData);
             if (attachRes?.error) {
               throw new Error(
-                attachRes.error.message || "تم حفظ البيانات ولكن فشل رفع الصورة المرفقة."
+                attachRes.error.message ||
+                  `تم حفظ البيانات ولكن فشل رفع الصورة رقم ${i + 1}.`
               );
             }
           }
+
+          // Remove uploaded photo from queue so retries won't duplicate it
+          removeQueuedPhoto(photo.id);
         }
 
         if (!isDemoMode) {

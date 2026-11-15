@@ -11,9 +11,12 @@ const ROUTE_LAYER_URL = "";
 
 // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
-  order: "order_num",   // حقل رقم الترتيب (رقمي)
-  status: "status",     // حقل الحالة ("Pending" / "Completed")
-  notes: "notes"        // حقل الملاحظات النصية
+  order: "order_num",                     // حقل رقم الترتيب (رقمي - للعرض والترتيب فقط)
+  status: "status",                       // حقل الحالة ("Pending" / "Completed")
+  actualHandoverDate: "actual_handover_date", // تاريخ الاستلام الفعلي (Date)
+  committeeDecision: "committee_decision",    // قرار لجنة التسليم (String >= 100 حرف)
+  hasBase: "has_base",                        // يوجد قاعدة بالموقع (String)
+  notesObstacles: "notes_obstacles"           // الملاحظات / المعوقات (String)
 };
 
 // قيم الحالة المخزنة في قاعدة البيانات
