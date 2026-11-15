@@ -89,6 +89,7 @@
     "esri/geometry/Point",
     "esri/geometry/Polyline",
     "esri/widgets/Track",
+    "esri/widgets/Fullscreen",
     "esri/renderers/UniqueValueRenderer",
     "esri/renderers/SimpleRenderer",
     "esri/symbols/SimpleMarkerSymbol",
@@ -105,6 +106,7 @@
     Point,
     Polyline,
     Track,
+    Fullscreen,
     UniqueValueRenderer,
     SimpleRenderer,
     SimpleMarkerSymbol,
@@ -192,13 +194,18 @@
       }
     });
 
-    // --- Live GPS Track Widget ---
+    // --- Live GPS Track & Fullscreen Widgets ---
+    const fullscreen = new Fullscreen({
+      view: view,
+      element: document.documentElement
+    });
+
     const track = new Track({
       view: view,
       goToLocationEnabled: true,
       useHeadingEnabled: true
     });
-    view.ui.add(track, "bottom-left");
+    view.ui.add([fullscreen, track], "bottom-left");
 
     view.when(() => {
       try {
