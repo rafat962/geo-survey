@@ -42,8 +42,7 @@ const IMAGE_WATERMARK = {
 
 // إعدادات الخريطة الافتراضية (يتم التقريب تلقائياً إلى حدود النقاط عند التحميل)
 const MAP_CONFIG = {
-  basemap: "streets-navigation-vector", // خريطة شوارع واضحة للتنقل الميداني (ويمكن التبديل لقمر صناعي من الزر)
-  satelliteBasemap: "hybrid",
+  basemap: "hybrid", // صور فضائية (Imagery Hybrid) مع أسماء الشوارع والمعالم
   defaultCenter: [46.6753, 24.7136], // [خط الطول, دائرة العرض]
   defaultZoom: 12
 };

@@ -20,7 +20,7 @@
 
   <!-- Top Progress & Next Point HUD -->
   <header class="top-hud">
-    <div class="hud-card">
+    <div class="hud-card progress-card">
       <div class="hud-top-row">
         <div class="progress-header">
           <span id="progressText">جاري تحميل النقاط...</span>
@@ -73,25 +73,24 @@
     </div>
   </header>
 
-  <!-- Floating Map Controls (Bottom-Right & Bottom-Left via MapView UI) -->
-  <button id="btnMyLocation" class="fab-btn fab-btn-compact" type="button" title="التركيز على موقعي">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"></circle>
-      <path d="M12 2v3m0 14v3M2 12h3m14 0h3"></path>
-      <circle cx="12" cy="12" r="7" stroke-opacity="0.4"></circle>
-    </svg>
-    <span>موقعي</span>
-  </button>
-
-  <div class="fab-stack">
-    <button id="btnToggleBasemap" class="fab-btn" type="button" title="تبديل نوع الخريطة">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-        <polyline points="2 12 12 17 22 12"></polyline>
-        <polyline points="2 17 12 22 22 17"></polyline>
+  <!-- Bottom-Left Grouped Controls: Fullscreen + My Location -->
+  <div class="fab-group-left" role="group" aria-label="أدوات الموقع والعرض">
+    <button id="btnFullscreen" class="fab-icon-btn" type="button" title="ملء الشاشة" aria-label="ملء الشاشة">
+      <svg id="fullscreenIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
       </svg>
-      <span id="basemapToggleText">قمر صناعي</span>
     </button>
+    <button id="btnMyLocation" class="fab-icon-btn" type="button" title="موقعي الحالي" aria-label="موقعي الحالي">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 2v3m0 14v3M2 12h3m14 0h3"></path>
+        <circle cx="12" cy="12" r="7" stroke-opacity="0.4"></circle>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Bottom-Right Control: Zoom to All Points -->
+  <div class="fab-stack">
     <button id="btnZoomAll" class="fab-btn" type="button" title="عرض جميع النقاط">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path>

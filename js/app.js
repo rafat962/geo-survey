@@ -128,9 +128,9 @@
       nextActionsRow: document.getElementById("nextActionsRow"),
       btnOpenNextForm: document.getElementById("btnOpenNextForm"),
       btnGoogleMaps: document.getElementById("btnGoogleMaps"),
+      btnFullscreen: document.getElementById("btnFullscreen"),
+      fullscreenIcon: document.getElementById("fullscreenIcon"),
       btnMyLocation: document.getElementById("btnMyLocation"),
-      btnToggleBasemap: document.getElementById("btnToggleBasemap"),
-      basemapToggleText: document.getElementById("basemapToggleText"),
       btnZoomAll: document.getElementById("btnZoomAll"),
       demoBadge: document.getElementById("demoBadge"),
       setupModal: document.getElementById("setupModal"),
@@ -172,9 +172,6 @@
     let selectedPhotos = [];
     let photoIdCounter = 0;
     let isDemoMode = false;
-    let isSatelliteBasemap =
-      String(MAP_CONFIG.basemap || "").includes("hybrid") ||
-      String(MAP_CONFIG.basemap || "").includes("satellite");
     let pulseIntervalId = null;
     let initialZoomDone = false;
     let toastTimer = null;
@@ -196,14 +193,14 @@
         autoOpenEnabled: false
       },
       padding: {
-        top: 170,
-        bottom: 48,
-        left: 16,
-        right: 16
+        top: 150,
+        bottom: 36,
+        left: 8,
+        right: 8
       }
     });
 
-    // --- Live GPS Track (background) & Bottom-Left Controls (Location + Fullscreen) ---
+    // --- Live GPS Track (background) & Fullscreen ViewModel ---
     const fullscreen = new Fullscreen({
       view: view,
       element: document.documentElement
@@ -214,7 +211,29 @@
       goToLocationEnabled: false,
       useHeadingEnabled: true
     });
-    view.ui.add([fullscreen, els.btnMyLocation], "bottom-left");
+
+    if (els.btnFullscreen) {
+      els.btnFullscreen.addEventListener("click", () => {
+        try {
+          fullscreen.viewModel.toggle();
+        } catch (err) {
+          console.warn("Fullscreen toggle warning:", err);
+        }
+      });
+
+      reactiveUtils.watch(
+        () => fullscreen.viewModel.state,
+        (state) => {
+          const isActive = state === "active";
+          els.btnFullscreen.title = isActive ? "إنهاء ملء الشاشة" : "ملء الشاشة";
+          if (els.fullscreenIcon) {
+            els.fullscreenIcon.innerHTML = isActive
+              ? '<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>'
+              : '<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>';
+          }
+        }
+      );
+    }
 
     view.when(() => {
       try {
@@ -239,9 +258,9 @@
     );
 
     // --- Symbology & Labeling ---
-    function getRouteLineSymbol(satelliteMode = isSatelliteBasemap) {
+    function getRouteLineSymbol() {
       return new SimpleLineSymbol({
-        color: satelliteMode ? [125, 211, 252, 0.9] : [37, 99, 235, 0.85],
+        color: [56, 189, 248, 0.92],
         width: 4,
         style: "solid",
         cap: "round",
@@ -1081,25 +1100,6 @@
         }
       }
     });
-
-    if (els.btnToggleBasemap) {
-      els.btnToggleBasemap.addEventListener("click", () => {
-        isSatelliteBasemap = !isSatelliteBasemap;
-        map.basemap = isSatelliteBasemap
-          ? MAP_CONFIG.satelliteBasemap || "hybrid"
-          : MAP_CONFIG.basemap || "streets-navigation-vector";
-
-        if (els.basemapToggleText) {
-          els.basemapToggleText.textContent = isSatelliteBasemap ? "خريطة شوارع" : "قمر صناعي";
-        }
-
-        if (routeLayer && routeLayer.type === "feature") {
-          routeLayer.renderer = new SimpleRenderer({
-            symbol: getRouteLineSymbol(isSatelliteBasemap)
-          });
-        }
-      });
-    }
 
     els.btnZoomAll.addEventListener("click", zoomToAllPoints);
 

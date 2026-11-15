@@ -76,29 +76,34 @@ body {
   pointer-events: auto;
 }
 
+.progress-card {
+  padding: 6px 10px;
+  border-radius: 13px;
+}
+
 .hud-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 6px;
+  margin-bottom: 4px;
 }
 
 .progress-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 12.5px;
   font-weight: 700;
   min-width: 0;
 }
 
 .progress-percent {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--completed-color);
   background: #dcfce7;
-  padding: 2px 9px;
+  padding: 1px 7px;
   border-radius: 999px;
   flex-shrink: 0;
 }
@@ -106,18 +111,18 @@ body {
 .user-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
 .user-badge {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-secondary);
   background: var(--bg-subtle);
-  padding: 4px 9px;
+  padding: 2px 7px;
   border-radius: 999px;
-  max-width: 110px;
+  max-width: 96px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -131,15 +136,15 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 36px;
-  padding: 0 10px;
-  border-radius: 10px;
+  min-width: 38px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
   border: 1px solid var(--border-color);
   background: #ffffff;
   color: var(--danger-color);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -151,7 +156,7 @@ body {
 
 .progress-track {
   width: 100%;
-  height: 8px;
+  height: 5px;
   background: var(--bg-subtle);
   border-radius: 999px;
   overflow: hidden;
@@ -312,6 +317,51 @@ body {
   color: #ffffff;
 }
 
+/* Bottom-Left Grouped Controls (Fullscreen + My Location) */
+.fab-group-left {
+  position: fixed;
+  left: 12px;
+  bottom: calc(32px + var(--safe-bottom));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.fab-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.fab-icon-btn + .fab-icon-btn {
+  border-top: 1px solid var(--border-color);
+}
+
+.fab-icon-btn:active {
+  background: var(--bg-subtle);
+  transform: scale(0.95);
+}
+
+.fab-icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
 /* Floating Map Action Buttons (Bottom-Right) */
 .fab-stack {
   position: fixed;
@@ -332,9 +382,11 @@ body {
   min-width: 44px;
   min-height: 44px;
   padding: 0 13px;
-  border-radius: 999px;
+  border-radius: 14px;
   border: 1px solid rgba(226, 232, 240, 0.95);
   background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--text-primary);
   box-shadow: var(--shadow-lg);
   font-family: inherit;
@@ -353,33 +405,6 @@ body {
   width: 19px;
   height: 19px;
   flex-shrink: 0;
-}
-
-/* Esri default UI widgets (Bottom-Left: Location + Fullscreen) */
-.esri-ui-bottom-left {
-  bottom: calc(32px + var(--safe-bottom)) !important;
-  left: 12px !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  gap: 8px !important;
-}
-
-.esri-ui-bottom-left .esri-component {
-  margin: 0 !important;
-}
-
-.esri-ui-bottom-left .esri-widget {
-  border-radius: 999px;
-  overflow: hidden;
-  box-shadow: var(--shadow-lg);
-  border: 1px solid rgba(226, 232, 240, 0.95);
-}
-
-.esri-widget--button {
-  width: 44px !important;
-  height: 44px !important;
-  background: rgba(255, 255, 255, 0.96) !important;
 }
 
 .esri-attribution {
