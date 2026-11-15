@@ -889,7 +889,10 @@
         els.nextSubtitle.textContent = "اضغط لفتح البيانات أو التوجيه عبر خرائط جوجل";
       }
 
-      // Draw bright 6px active line from live GPS (or last completed stop) to Next Pending Stop
+      // Real ArcGIS street route is already on the map; only draw straight fallback segment if no ROUTE_LAYER_URL is configured
+      if (ROUTE_LAYER_URL && ROUTE_LAYER_URL.trim() !== "") return;
+
+      // Draw active line from live GPS (or last completed stop) to Next Pending Stop when no route layer exists
       const lastCompleted = getLastCompletedFeature(cachedFeatures);
       const originCoords = gpsCoords || extractLatLng(lastCompleted?.geometry);
 
