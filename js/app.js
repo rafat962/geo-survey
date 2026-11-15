@@ -387,16 +387,29 @@
       if (!Array.isArray(fields) || fields.length === 0) {
         return FIELDS.order || "Sequence";
       }
-      const primary = (FIELDS.order || "Sequence").toLowerCase();
-      const fallback = (FIELDS.orderFallback || "order_num").toLowerCase();
+      const candidates = [
+        FIELDS.order || "Sequence",
+        FIELDS.orderFallback || "order_num",
+        "Sequence",
+        "order_num",
+        "StopOrder",
+        "OrderNum",
+        "Order_Num",
+        "Seq",
+        "Stop_Num",
+        "Point_Num",
+        "Order"
+      ];
 
-      const primaryMatch = fields.find((f) => f.name?.toLowerCase() === primary);
-      if (primaryMatch) return primaryMatch.name;
+      for (const candidate of candidates) {
+        const match = fields.find(
+          (f) => f.name?.toLowerCase() === candidate.toLowerCase()
+        );
+        if (match) return match.name;
+      }
 
-      const fallbackMatch = fields.find((f) => f.name?.toLowerCase() === fallback);
-      if (fallbackMatch) return fallbackMatch.name;
-
-      return FIELDS.order || "Sequence";
+      const oidField = fields.find((f) => f.type === "oid");
+      return oidField ? oidField.name : FIELDS.order || "Sequence";
     }
 
     function resolveStatusFieldName(fields) {
@@ -426,7 +439,8 @@
         FIELDS.order,
         FIELDS.orderFallback,
         "Sequence",
-        "order_num"
+        "order_num",
+        "OBJECTID"
       ].filter(Boolean);
 
       for (const name of candidates) {
@@ -441,6 +455,46 @@
         }
       }
       return null;
+    }
+
+    async function fetchSublayerDetails(serviceRoot, layerStub, token, includeCount = false) {
+      const layerUrl = `${serviceRoot}/${layerStub.id}`;
+      let geometryType = layerStub.geometryType || null;
+      let name = layerStub.name || "";
+      let count = null;
+
+      try {
+        if (!geometryType) {
+          const detailUrl = new URL(layerUrl);
+          detailUrl.searchParams.set("f", "json");
+          if (token) detailUrl.searchParams.set("token", token);
+          const detailRes = await fetch(detailUrl.toString());
+          if (detailRes.ok) {
+            const detailJson = await detailRes.json().catch(() => null);
+            geometryType = detailJson?.geometryType || geometryType;
+            name = detailJson?.name || name;
+          }
+        }
+
+        if (includeCount) {
+          const countUrl = new URL(`${layerUrl}/query`);
+          countUrl.searchParams.set("where", "1=1");
+          countUrl.searchParams.set("returnCountOnly", "true");
+          countUrl.searchParams.set("f", "json");
+          if (token) countUrl.searchParams.set("token", token);
+          const countRes = await fetch(countUrl.toString());
+          if (countRes.ok) {
+            const countJson = await countRes.json().catch(() => null);
+            if (typeof countJson?.count === "number") {
+              count = countJson.count;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Sublayer detail inspection failed for", layerUrl, err);
+      }
+
+      return { id: layerStub.id, name, geometryType, count, url: layerUrl };
     }
 
     async function resolveFeatureLayerUrl(configuredUrl, token, preferredGeomType) {
@@ -463,30 +517,50 @@
           return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
         }
         const info = await res.json().catch(() => null);
+        if (info?.error) {
+          console.warn("ArcGIS service metadata error:", serviceRoot, info.error);
+          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+        }
+
         const layers = Array.isArray(info?.layers) ? info.layers : [];
         if (layers.length === 0) {
           return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
         }
 
-        const existingConfigured =
-          configuredLayerId !== null
-            ? layers.find((l) => Number(l.id) === configuredLayerId)
-            : null;
+        const needsSublayerCount =
+          preferredGeomType === "esriGeometryPolyline" && layers.length > 1;
+        const detailedLayers = await Promise.all(
+          layers.map((l) => fetchSublayerDetails(serviceRoot, l, token, needsSublayerCount))
+        );
 
-        if (
-          existingConfigured &&
-          (!preferredGeomType ||
-            !existingConfigured.geometryType ||
-            existingConfigured.geometryType === preferredGeomType)
-        ) {
-          return `${serviceRoot}/${existingConfigured.id}`;
+        const geomMatches = preferredGeomType
+          ? detailedLayers.filter((l) => l.geometryType === preferredGeomType)
+          : detailedLayers;
+
+        const nonEmptyMatches = geomMatches.filter((l) => l.count === null || l.count > 0);
+        const pool = nonEmptyMatches.length > 0 ? nonEmptyMatches : geomMatches;
+
+        if (pool.length > 0) {
+          const configuredMatch =
+            configuredLayerId !== null
+              ? pool.find((l) => Number(l.id) === configuredLayerId)
+              : null;
+          if (configuredMatch) return configuredMatch.url;
+
+          if (preferredGeomType === "esriGeometryPolyline") {
+            const routeNamed = pool.find(
+              (l) => /route/i.test(l.name) && !/direction/i.test(l.name)
+            );
+            if (routeNamed) return routeNamed.url;
+          }
+          return pool[0].url;
         }
 
-        const geomMatch = preferredGeomType
-          ? layers.find((l) => l.geometryType === preferredGeomType)
-          : null;
-        const chosen = geomMatch || existingConfigured || layers[0];
-        return `${serviceRoot}/${chosen.id}`;
+        const existingConfigured =
+          configuredLayerId !== null
+            ? detailedLayers.find((l) => Number(l.id) === configuredLayerId)
+            : null;
+        return (existingConfigured || detailedLayers[0]).url;
       } catch (err) {
         console.warn("Service metadata inspection skipped for", cleanUrl, err);
         return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
@@ -515,21 +589,28 @@
             resolveFeatureLayerUrl(POINTS_LAYER_URL, accessToken, "esriGeometryPoint")
           ]);
 
+      console.info("Resolved layer URLs:", { resolvedPointsUrl, resolvedRouteUrl });
+
       if (resolvedRouteUrl && resolvedRouteUrl.trim() !== "") {
         routeLayer = new FeatureLayer({
           url: resolvedRouteUrl,
+          outFields: ["*"],
           popupEnabled: false,
-          opacity: 0.25,
+          opacity: 0.78,
+          minScale: 0,
+          maxScale: 0,
           renderer: new SimpleRenderer({
             symbol: new SimpleLineSymbol({
-              color: [148, 163, 184, 1],
-              width: 3,
-              style: "solid"
+              color: [224, 242, 254, 0.85],
+              width: 4,
+              style: "solid",
+              cap: "round",
+              join: "round"
             })
           })
         });
       } else {
-        routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.25 });
+        routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.65 });
       }
 
       if (useDemo) {
@@ -539,6 +620,8 @@
           url: resolvedPointsUrl,
           outFields: ["*"],
           popupEnabled: false,
+          minScale: 0,
+          maxScale: 0,
           renderer: createPointsRenderer(activeStatusField)
         });
       }
@@ -546,19 +629,44 @@
       map.addMany([routeLayer, activeSegmentLayer, highlightLayer, pointsLayer]);
 
       if (routeLayer && routeLayer.type === "feature") {
-        routeLayer.load().catch((err) => {
-          console.error("Failed to load route layer:", err);
-          showToast(
-            `تعذر تحميل طبقة المسار: ${err?.message || "تحقق من الرابط أو الصلاحيات"}`,
-            "error",
-            6000
-          );
-        });
+        routeLayer
+          .load()
+          .then(async () => {
+            console.info("Route layer loaded:", {
+              url: routeLayer.url,
+              geometryType: routeLayer.geometryType
+            });
+            if (routeLayer.geometryType && routeLayer.geometryType !== "polyline") {
+              showToast(
+                `تنبيه: طبقة المسار (${routeLayer.url}) نوعها ${routeLayer.geometryType} وليست خطوطاً`,
+                "error",
+                6500
+              );
+              return;
+            }
+            const routeCount = await routeLayer.queryFeatureCount().catch(() => null);
+            console.info("Route feature count:", routeCount);
+            if (routeCount === 0) {
+              showToast("طبقة المسار محملة لكنها فارغة (0 خطوط)", "error", 6000);
+            }
+          })
+          .catch((err) => {
+            console.error("Failed to load route layer:", err);
+            showToast(
+              `تعذر تحميل طبقة المسار: ${err?.message || "تحقق من الرابط أو الصلاحيات"}`,
+              "error",
+              6500
+            );
+          });
       }
 
       pointsLayer
         .load()
         .then(() => {
+          console.info(
+            "Points layer fields:",
+            (pointsLayer.fields || []).map((f) => f.name)
+          );
           activeOrderField = resolveOrderFieldName(pointsLayer.fields);
           activeStatusField = resolveStatusFieldName(pointsLayer.fields);
           pointsLayer.renderer = createPointsRenderer(activeStatusField);
