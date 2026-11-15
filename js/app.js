@@ -92,7 +92,8 @@
     "esri/renderers/UniqueValueRenderer",
     "esri/symbols/SimpleMarkerSymbol",
     "esri/symbols/SimpleLineSymbol",
-    "esri/layers/support/LabelClass"
+    "esri/layers/support/LabelClass",
+    "esri/identity/IdentityManager"
   ], function (
     Map,
     MapView,
@@ -105,7 +106,8 @@
     UniqueValueRenderer,
     SimpleMarkerSymbol,
     SimpleLineSymbol,
-    LabelClass
+    LabelClass,
+    IdentityManager
   ) {
     // --- DOM References ---
     const els = {
@@ -263,10 +265,81 @@
       ];
     }
 
+    // --- Private Layer Token Registration (/api/esri-token) ---
+    let esriTokenRefreshTimer = null;
+
+    function getServiceServers(layerUrl) {
+      if (!layerUrl || typeof layerUrl !== "string") return [];
+      const trimmed = layerUrl.trim();
+      if (!trimmed) return [];
+      const servers = [];
+      const restMatch = trimmed.match(/^(https?:\/\/[^?#]+?\/rest\/services)/i);
+      if (restMatch) servers.push(restMatch[1]);
+      try {
+        servers.push(new URL(trimmed).origin);
+      } catch (err) {}
+      return servers;
+    }
+
+    async function registerEsriTokenFromServer() {
+      if (IS_LOCAL_FILE) return null;
+
+      try {
+        const res = await fetch("/api/esri-token", { cache: "no-store" });
+        if (res.status === 401) {
+          window.location.replace("/");
+          return null;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.warn("Esri token endpoint error:", data.error || res.status);
+          return null;
+        }
+
+        const accessToken = data.access_token || data.token;
+        if (!accessToken) return null;
+
+        const expiresInSec = Number(data.expires_in) || 3600;
+        const expiresAtMs = Date.now() + expiresInSec * 1000;
+        const portalBase = (data.portalUrl || "https://www.arcgis.com").replace(/\/+$/, "");
+
+        const serverRoots = new Set([
+          `${portalBase}/sharing/rest`,
+          ...getServiceServers(POINTS_LAYER_URL),
+          ...getServiceServers(ROUTE_LAYER_URL)
+        ]);
+
+        serverRoots.forEach((server) => {
+          IdentityManager.registerToken({
+            server,
+            token: accessToken,
+            expires: expiresAtMs,
+            ssl: server.startsWith("https://")
+          });
+        });
+
+        // Silently renew 5 minutes before expiration
+        if (esriTokenRefreshTimer) clearTimeout(esriTokenRefreshTimer);
+        const refreshDelayMs = Math.max(60000, (expiresInSec - 300) * 1000);
+        esriTokenRefreshTimer = setTimeout(() => {
+          registerEsriTokenFromServer().catch(() => {});
+        }, refreshDelayMs);
+
+        return accessToken;
+      } catch (err) {
+        console.warn("Failed to fetch /api/esri-token:", err);
+        return null;
+      }
+    }
+
     // --- Layer Initialization ---
-    function initializeLayers(useDemo) {
+    async function initializeLayers(useDemo) {
       isDemoMode = useDemo;
       els.demoBadge.classList.toggle("visible", useDemo);
+
+      if (!useDemo) {
+        await registerEsriTokenFromServer();
+      }
 
       if (ROUTE_LAYER_URL && ROUTE_LAYER_URL.trim() !== "") {
         routeLayer = new FeatureLayer({

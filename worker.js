@@ -239,6 +239,96 @@ export default {
       return new Response(null, { status: 302, headers });
     }
 
+    // 4. GET /api/esri-token (Protected by user session cookie)
+    if (pathname === "/api/esri-token" && request.method === "GET") {
+      const authCookie = getCookie(request, "auth_token");
+      const authedUser = await verifyToken(authCookie, secretKeyStr, USERS);
+      if (!authedUser) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store"
+          }
+        });
+      }
+
+      const clientId = env.ESRI_CLIENT_ID;
+      const clientSecret = env.ESRI_CLIENT_SECRET;
+      const portalUrl = (env.ESRI_PORTAL_URL || "https://www.arcgis.com").replace(/\/+$/, "");
+
+      if (!clientId || !clientSecret) {
+        return new Response(
+          JSON.stringify({
+            error: "Missing ESRI_CLIENT_ID or ESRI_CLIENT_SECRET in environment variables"
+          }),
+          {
+            status: 500,
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Cache-Control": "no-store"
+            }
+          }
+        );
+      }
+
+      try {
+        const body = new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: "client_credentials",
+          expiration: "60",
+          f: "json"
+        });
+
+        const tokenRes = await fetch(`${portalUrl}/sharing/rest/oauth2/token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString()
+        });
+
+        const tokenData = await tokenRes.json();
+        if (tokenData.error || !tokenData.access_token) {
+          return new Response(
+            JSON.stringify({
+              error: tokenData.error?.message || "Failed to generate Esri token",
+              details: tokenData.error || null
+            }),
+            {
+              status: 502,
+              headers: {
+                "Content-Type": "application/json; charset=utf-8",
+                "Cache-Control": "no-store"
+              }
+            }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            access_token: tokenData.access_token,
+            expires_in: tokenData.expires_in || 3600,
+            portalUrl
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Cache-Control": "no-store"
+            }
+          }
+        );
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 502,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store"
+          }
+        });
+      }
+    }
+
     // Normalize /app -> /app/
     if (pathname === "/app") {
       return new Response(null, {
