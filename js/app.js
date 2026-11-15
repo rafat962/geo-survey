@@ -90,10 +90,12 @@
     "esri/geometry/Polyline",
     "esri/widgets/Track",
     "esri/renderers/UniqueValueRenderer",
+    "esri/renderers/SimpleRenderer",
     "esri/symbols/SimpleMarkerSymbol",
     "esri/symbols/SimpleLineSymbol",
     "esri/layers/support/LabelClass",
-    "esri/identity/IdentityManager"
+    "esri/identity/IdentityManager",
+    "esri/core/reactiveUtils"
   ], function (
     Map,
     MapView,
@@ -104,10 +106,12 @@
     Polyline,
     Track,
     UniqueValueRenderer,
+    SimpleRenderer,
     SimpleMarkerSymbol,
     SimpleLineSymbol,
     LabelClass,
-    IdentityManager
+    IdentityManager,
+    reactiveUtils
   ) {
     // --- DOM References ---
     const els = {
@@ -115,9 +119,13 @@
       progressPercent: document.getElementById("progressPercent"),
       progressFill: document.getElementById("progressFill"),
       nextBanner: document.getElementById("nextBanner"),
+      nextHeaderRow: document.getElementById("nextHeaderRow"),
       nextTitle: document.getElementById("nextTitle"),
       nextSubtitle: document.getElementById("nextSubtitle"),
-      btnNavigateNext: document.getElementById("btnNavigateNext"),
+      btnZoomNext: document.getElementById("btnZoomNext"),
+      nextActionsRow: document.getElementById("nextActionsRow"),
+      btnOpenNextForm: document.getElementById("btnOpenNextForm"),
+      btnGoogleMaps: document.getElementById("btnGoogleMaps"),
       btnMyLocation: document.getElementById("btnMyLocation"),
       btnZoomAll: document.getElementById("btnZoomAll"),
       demoBadge: document.getElementById("demoBadge"),
@@ -150,7 +158,9 @@
     // --- State ---
     let pointsLayer = null;
     let routeLayer = null;
+    let activeSegmentLayer = new GraphicsLayer({ id: "active-next-segment" });
     let highlightLayer = new GraphicsLayer({ id: "next-point-highlight" });
+    let activeOrderField = FIELDS.order || "Sequence";
     let cachedFeatures = [];
     let nextPendingFeature = null;
     let activeFeature = null;
@@ -175,7 +185,7 @@
         autoOpenEnabled: false
       },
       padding: {
-        top: 145,
+        top: 195,
         bottom: 40,
         left: 16,
         right: 16
@@ -202,6 +212,16 @@
       console.warn("GPS track error:", evt?.error);
     });
 
+    // Re-draw active GPS -> Next Stop segment & distance as the field worker moves
+    reactiveUtils.watch(
+      () => track.graphic?.geometry,
+      () => {
+        if (nextPendingFeature) {
+          updateNextStopDistanceAndSegment();
+        }
+      }
+    );
+
     // --- Symbology & Labeling ---
     function createPointsRenderer() {
       const pendingSymbol = new SimpleMarkerSymbol({
@@ -214,13 +234,14 @@
         }
       });
 
+      // Dim completed stops so they don't visually clash with nearby upcoming stops
       const completedSymbol = new SimpleMarkerSymbol({
         style: "circle",
-        color: "#16a34a",
-        size: "26px",
+        color: [22, 163, 74, 0.6],
+        size: "16px",
         outline: {
-          color: "#ffffff",
-          width: 2.5
+          color: [255, 255, 255, 0.65],
+          width: 1.5
         }
       });
 
@@ -243,18 +264,19 @@
       });
     }
 
-    function createNumberedLabeling() {
+    function createNumberedLabeling(orderFieldName = activeOrderField) {
       return [
         new LabelClass({
           labelPlacement: "center-center",
+          where: `${FIELDS.status} <> '${STATUS_VALUES.completed}' OR ${FIELDS.status} IS NULL`,
           labelExpressionInfo: {
-            expression: `$feature.${FIELDS.order}`
+            expression: `$feature.${orderFieldName}`
           },
           symbol: {
             type: "text",
             color: "#ffffff",
-            haloColor: "rgba(15, 23, 42, 0.55)",
-            haloSize: "1.2px",
+            haloColor: "rgba(15, 23, 42, 0.65)",
+            haloSize: "1.3px",
             font: {
               family: "Arial, sans-serif",
               size: "12px",
@@ -333,6 +355,46 @@
     }
 
     // --- Layer Initialization ---
+    function resolveOrderFieldName(fields) {
+      if (!Array.isArray(fields) || fields.length === 0) {
+        return FIELDS.order || "Sequence";
+      }
+      const primary = (FIELDS.order || "Sequence").toLowerCase();
+      const fallback = (FIELDS.orderFallback || "order_num").toLowerCase();
+
+      const primaryMatch = fields.find((f) => f.name?.toLowerCase() === primary);
+      if (primaryMatch) return primaryMatch.name;
+
+      const fallbackMatch = fields.find((f) => f.name?.toLowerCase() === fallback);
+      if (fallbackMatch) return fallbackMatch.name;
+
+      return FIELDS.order || "Sequence";
+    }
+
+    function getStopOrderValue(attrs) {
+      if (!attrs) return null;
+      const candidates = [
+        activeOrderField,
+        FIELDS.order,
+        FIELDS.orderFallback,
+        "Sequence",
+        "order_num"
+      ].filter(Boolean);
+
+      for (const name of candidates) {
+        if (attrs[name] !== undefined && attrs[name] !== null && attrs[name] !== "") {
+          return attrs[name];
+        }
+        const ciKey = Object.keys(attrs).find(
+          (k) => k.toLowerCase() === name.toLowerCase()
+        );
+        if (ciKey && attrs[ciKey] !== undefined && attrs[ciKey] !== null && attrs[ciKey] !== "") {
+          return attrs[ciKey];
+        }
+      }
+      return null;
+    }
+
     async function initializeLayers(useDemo) {
       isDemoMode = useDemo;
       els.demoBadge.classList.toggle("visible", useDemo);
@@ -344,10 +406,18 @@
       if (ROUTE_LAYER_URL && ROUTE_LAYER_URL.trim() !== "") {
         routeLayer = new FeatureLayer({
           url: ROUTE_LAYER_URL.trim(),
-          popupEnabled: false
+          popupEnabled: false,
+          opacity: 0.25,
+          renderer: new SimpleRenderer({
+            symbol: new SimpleLineSymbol({
+              color: [148, 163, 184, 1],
+              width: 3,
+              style: "solid"
+            })
+          })
         });
       } else {
-        routeLayer = new GraphicsLayer({ id: "auto-route-layer" });
+        routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.25 });
       }
 
       if (useDemo) {
@@ -358,15 +428,18 @@
           outFields: ["*"],
           popupEnabled: false,
           renderer: createPointsRenderer(),
-          labelingInfo: createNumberedLabeling()
+          labelingInfo: createNumberedLabeling(activeOrderField),
+          orderBy: [{ field: FIELDS.status, order: "ascending" }]
         });
       }
 
-      map.addMany([routeLayer, highlightLayer, pointsLayer]);
+      map.addMany([routeLayer, activeSegmentLayer, highlightLayer, pointsLayer]);
 
       pointsLayer
         .load()
         .then(() => {
+          activeOrderField = resolveOrderFieldName(pointsLayer.fields);
+          pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField);
           return loadAndSyncPoints(true);
         })
         .catch((err) => {
@@ -432,7 +505,7 @@
         spatialReference: { wkid: 4326 },
         fields: [
           { name: "OBJECTID", alias: "OBJECTID", type: "oid" },
-          { name: FIELDS.order, alias: "رقم النقطة", type: "integer", editable: false },
+          { name: FIELDS.order, alias: "رقم المحطة", type: "integer", editable: false },
           { name: FIELDS.status, alias: "الحالة", type: "string", editable: true },
           { name: FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
           { name: FIELDS.committeeDecision, alias: "قرار لجنة التسليم", type: "string", length: 150, editable: true },
@@ -441,7 +514,8 @@
         ],
         popupEnabled: false,
         renderer: createPointsRenderer(),
-        labelingInfo: createNumberedLabeling()
+        labelingInfo: createNumberedLabeling(FIELDS.order),
+        orderBy: [{ field: FIELDS.status, order: "ascending" }]
       });
     }
 
@@ -473,8 +547,8 @@
 
     function sortFeaturesByOrder(features) {
       return [...features].sort((a, b) => {
-        const valA = Number(a.attributes?.[FIELDS.order]);
-        const valB = Number(b.attributes?.[FIELDS.order]);
+        const valA = Number(getStopOrderValue(a.attributes));
+        const valB = Number(getStopOrderValue(b.attributes));
         const numA = Number.isFinite(valA) ? valA : Number.MAX_SAFE_INTEGER;
         const numB = Number.isFinite(valB) ? valB : Number.MAX_SAFE_INTEGER;
         return numA - numB;
@@ -501,25 +575,111 @@
       els.progressFill.style.width = `${pct}%`;
     }
 
+    function calcDistanceMeters(fromCoords, toCoords) {
+      if (!fromCoords || !toCoords) return null;
+      const R = 6371000;
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const dLat = toRad(toCoords.lat - fromCoords.lat);
+      const dLon = toRad(toCoords.lng - fromCoords.lng);
+      const lat1 = toRad(fromCoords.lat);
+      const lat2 = toRad(toCoords.lat);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function formatDistanceArabic(meters) {
+      if (meters === null || !Number.isFinite(meters)) return null;
+      if (meters < 1000) return `${Math.round(meters)} متر`;
+      return `${(meters / 1000).toFixed(2)} كم`;
+    }
+
+    function getLastCompletedFeature(sortedFeatures) {
+      const completedList = sortedFeatures.filter((f) =>
+        isCompletedStatus(f.attributes?.[FIELDS.status])
+      );
+      return completedList.length > 0
+        ? completedList[completedList.length - 1]
+        : null;
+    }
+
+    function updateNextStopDistanceAndSegment() {
+      activeSegmentLayer.removeAll();
+      if (!nextPendingFeature || !nextPendingFeature.geometry) return;
+
+      const targetCoords = extractLatLng(nextPendingFeature.geometry);
+      const gpsCoords = extractLatLng(track?.graphic?.geometry);
+
+      if (gpsCoords && targetCoords) {
+        const distLabel = formatDistanceArabic(
+          calcDistanceMeters(gpsCoords, targetCoords)
+        );
+        els.nextSubtitle.textContent = `المسافة من موقعك: ${distLabel}`;
+      } else {
+        els.nextSubtitle.textContent = "اضغط لفتح البيانات أو التوجيه عبر خرائط جوجل";
+      }
+
+      // Draw bright 6px active line from live GPS (or last completed stop) to Next Pending Stop
+      const lastCompleted = getLastCompletedFeature(cachedFeatures);
+      const originCoords = gpsCoords || extractLatLng(lastCompleted?.geometry);
+
+      if (originCoords && targetCoords) {
+        const segmentLine = new Polyline({
+          paths: [
+            [
+              [originCoords.lng, originCoords.lat],
+              [targetCoords.lng, targetCoords.lat]
+            ]
+          ],
+          spatialReference: { wkid: 4326 }
+        });
+
+        activeSegmentLayer.add(
+          new Graphic({
+            geometry: segmentLine,
+            symbol: new SimpleLineSymbol({
+              color: [14, 165, 233, 0.95],
+              width: 6,
+              style: "solid",
+              cap: "round",
+              join: "round"
+            })
+          })
+        );
+      }
+    }
+
     function updateNextPendingPoint(sortedFeatures) {
       nextPendingFeature =
         sortedFeatures.find((f) => !isCompletedStatus(f.attributes?.[FIELDS.status])) || null;
 
       if (!nextPendingFeature) {
         els.nextBanner.classList.add("all-done");
-        els.nextTitle.textContent = "تم إنجاز جميع النقاط بنجاح!";
-        els.nextSubtitle.textContent = "لا توجد نقاط متبقية في المسار";
-        els.btnNavigateNext.hidden = true;
+        els.nextTitle.textContent = "تم إنجاز جميع المحطات بنجاح!";
+        els.nextSubtitle.textContent = "لا توجد محطات متبقية في المسار";
+        els.btnZoomNext.hidden = true;
+        els.nextActionsRow.hidden = true;
+        activeSegmentLayer.removeAll();
         clearNextPointHalo();
         return;
       }
 
-      const orderNum = nextPendingFeature.attributes?.[FIELDS.order] ?? "--";
+      const orderNum = getStopOrderValue(nextPendingFeature.attributes) ?? "--";
       els.nextBanner.classList.remove("all-done");
-      els.nextTitle.textContent = `النقطة التالية: رقم ${orderNum}`;
-      els.nextSubtitle.textContent = "اضغط توجيه للانتقال إليها على الخريطة";
-      els.btnNavigateNext.hidden = false;
+      els.nextTitle.textContent = `المحطة التالية: رقم #${orderNum}`;
+      els.btnZoomNext.hidden = false;
+      els.nextActionsRow.hidden = false;
 
+      const targetCoords = extractLatLng(nextPendingFeature.geometry);
+      if (targetCoords) {
+        els.btnGoogleMaps.href = `https://www.google.com/maps/dir/?api=1&destination=${targetCoords.lat},${targetCoords.lng}`;
+      } else {
+        els.btnGoogleMaps.href = "#";
+      }
+
+      updateNextStopDistanceAndSegment();
       renderPulsingHalo(nextPendingFeature.geometry);
     }
 
@@ -541,9 +701,9 @@
       const routeGraphic = new Graphic({
         geometry: polyline,
         symbol: new SimpleLineSymbol({
-          color: [56, 189, 248, 0.95],
-          width: 3.5,
-          style: "dash"
+          color: [148, 163, 184, 1],
+          width: 3,
+          style: "solid"
         })
       });
 
@@ -566,11 +726,11 @@
         geometry: geometry,
         symbol: new SimpleMarkerSymbol({
           style: "circle",
-          color: [251, 146, 60, 0.18],
-          size: "46px",
+          color: [251, 146, 60, 0.22],
+          size: "50px",
           outline: {
-            color: [249, 115, 22, 0.9],
-            width: 2.5
+            color: [249, 115, 22, 0.95],
+            width: 3
           }
         })
       });
@@ -580,10 +740,10 @@
         symbol: new SimpleMarkerSymbol({
           style: "circle",
           color: [251, 146, 60, 0],
-          size: "36px",
+          size: "38px",
           outline: {
-            color: [249, 115, 22, 0.85],
-            width: 2.5
+            color: [249, 115, 22, 0.9],
+            width: 3
           }
         })
       });
@@ -594,8 +754,8 @@
       pulseIntervalId = setInterval(() => {
         step = (step + 1) % 30;
         const progress = step / 30;
-        const sizePx = 32 + progress * 28;
-        const alpha = Math.max(0, 0.9 * (1 - progress));
+        const sizePx = 34 + progress * 34;
+        const alpha = Math.max(0, 0.95 * (1 - progress));
 
         pulseRing.symbol = new SimpleMarkerSymbol({
           style: "circle",
@@ -603,7 +763,7 @@
           size: `${sizePx.toFixed(1)}px`,
           outline: {
             color: [249, 115, 22, alpha],
-            width: 2.5
+            width: 3
           }
         });
       }, 55);
@@ -621,8 +781,7 @@
       view.goTo(target, { duration: 650, easing: "ease-out" }).catch(() => {});
     }
 
-    // --- Map Interactions & Floating Buttons ---
-    els.btnNavigateNext.addEventListener("click", () => {
+    function zoomToNextPendingStop() {
       if (!nextPendingFeature || !nextPendingFeature.geometry) return;
       view
         .goTo(
@@ -630,6 +789,18 @@
           { duration: 700 }
         )
         .catch(() => {});
+    }
+
+    // --- Map Interactions & Floating Buttons ---
+    els.btnZoomNext.addEventListener("click", zoomToNextPendingStop);
+    els.nextHeaderRow.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      zoomToNextPendingStop();
+    });
+
+    els.btnOpenNextForm.addEventListener("click", () => {
+      if (!nextPendingFeature) return;
+      openBottomSheet(nextPendingFeature);
     });
 
     els.btnMyLocation.addEventListener("click", () => {
@@ -721,10 +892,10 @@
       hideFormError();
 
       const attrs = fullGraphic.attributes || {};
-      const orderVal = attrs[FIELDS.order] ?? "--";
+      const orderVal = getStopOrderValue(attrs) ?? "--";
       const completed = isCompletedStatus(attrs[FIELDS.status]);
 
-      els.sheetTitle.textContent = `نقطة رقم ${orderVal}`;
+      els.sheetTitle.textContent = `محطة رقم #${orderVal}`;
       els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
       els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
 
@@ -1006,7 +1177,7 @@
       const timestamp = formatWatermarkTimestamp(new Date());
       const includeOrder =
         typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.includePointOrder;
-      const orderNum = activeFeature?.attributes?.[FIELDS.order];
+      const orderNum = getStopOrderValue(activeFeature?.attributes);
 
       const lines = [];
       if (includeOrder && orderNum !== undefined && orderNum !== null) {

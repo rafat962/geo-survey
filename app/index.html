@@ -39,16 +39,33 @@
     </div>
 
     <div id="nextBanner" class="hud-card next-banner">
-      <div class="next-info">
-        <span class="pulse-dot"></span>
-        <div class="next-text-wrap">
-          <div id="nextTitle" class="next-title">جاري تحديد النقطة التالية...</div>
-          <div id="nextSubtitle" class="next-subtitle">يرجى الانتظار</div>
+      <div id="nextHeaderRow" class="next-header-row">
+        <div class="next-info">
+          <span class="pulse-dot"></span>
+          <div class="next-text-wrap">
+            <div id="nextTitle" class="next-title">جاري تحديد المحطة التالية...</div>
+            <div id="nextSubtitle" class="next-subtitle">يرجى الانتظار</div>
+          </div>
         </div>
+        <button id="btnZoomNext" class="btn-zoom-next" type="button" title="التركيز على المحطة التالية" hidden>
+          🎯 تقريب
+        </button>
       </div>
-      <button id="btnNavigateNext" class="btn-navigate" type="button" hidden>
-        توجيه
-      </button>
+
+      <div id="nextActionsRow" class="next-actions-row" hidden>
+        <button id="btnOpenNextForm" class="btn-next-action primary" type="button">
+          📋 فتح البيانات
+        </button>
+        <a
+          id="btnGoogleMaps"
+          class="btn-next-action maps"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          🗺️ خرائط جوجل
+        </a>
+      </div>
     </div>
 
     <div id="demoBadge" class="demo-pill">

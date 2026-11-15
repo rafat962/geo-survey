@@ -7,12 +7,14 @@ const POINTS_LAYER_URL =
   "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Points_Data/FeatureServer/0";
 
 // رابط طبقة المسار (اختياري) - في حال تركه فارغاً يتم رسم خط متقطع تلقائياً بين النقاط مرتبة تصاعدياً
-const ROUTE_LAYER_URL = "";
+const ROUTE_LAYER_URL =
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/route/FeatureServer/0";
 
 // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
-  order: "order_num",                     // حقل رقم الترتيب (رقمي - للعرض والترتيب فقط)
-  status: "status",                       // حقل الحالة ("Pending" / "Completed")
+  order: "Sequence",                          // حقل رقم الترتيب الأساسي (ArcGIS Plan Routes)
+  orderFallback: "order_num",                 // حقل الترتيب البديل في حال عدم وجود Sequence
+  status: "status",                           // حقل الحالة ("Pending" / "Completed")
   actualHandoverDate: "actual_handover_date", // تاريخ الاستلام الفعلي (Date)
   committeeDecision: "committee_decision",    // قرار لجنة التسليم (String >= 100 حرف)
   hasBase: "has_base",                        // يوجد قاعدة بالموقع (String)

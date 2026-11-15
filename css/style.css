@@ -168,17 +168,23 @@ body {
 /* Next Pending Point Banner */
 .next-banner {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 10px;
   background: linear-gradient(135deg, #0f172a, #1e293b);
   color: #ffffff;
   border: none;
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .next-banner.all-done {
   background: linear-gradient(135deg, #15803d, #16a34a);
+}
+
+.next-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .next-info {
@@ -186,6 +192,7 @@ body {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  cursor: pointer;
 }
 
 .pulse-dot {
@@ -222,48 +229,87 @@ body {
 }
 
 .next-title {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .next-subtitle {
-  font-size: 12px;
+  font-size: 12.5px;
   color: #cbd5e1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.btn-navigate {
+.btn-zoom-next {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 72px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-zoom-next:active {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.btn-zoom-next[hidden] {
+  display: none;
+}
+
+.next-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.next-actions-row[hidden] {
+  display: none;
+}
+
+.btn-next-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 84px;
-  min-height: 44px;
-  padding: 0 14px;
+  min-height: 46px;
+  padding: 0 12px;
   border: none;
   border-radius: 12px;
-  background: var(--accent-blue);
-  color: #ffffff;
   font-family: inherit;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 800;
+  text-decoration: none;
   cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s ease, transform 0.1s ease;
+  transition: transform 0.1s ease, opacity 0.15s ease;
 }
 
-.btn-navigate:active {
-  transform: scale(0.96);
-  background: var(--accent-blue-dark);
+.btn-next-action:active {
+  transform: scale(0.97);
 }
 
-.btn-navigate[hidden] {
-  display: none;
+.btn-next-action.primary {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.btn-next-action.maps {
+  background: var(--accent-blue);
+  color: #ffffff;
 }
 
 /* Floating Map Action Buttons */
