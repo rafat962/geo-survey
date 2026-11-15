@@ -4,6 +4,19 @@
 
 (function () {
   const IS_LOCAL_FILE = location.protocol === "file:";
+  const LOCAL_AUTH_KEY = "fieldAppLocalAuth";
+
+  if (IS_LOCAL_FILE) {
+    try {
+      if (!sessionStorage.getItem(LOCAL_AUTH_KEY)) {
+        window.location.replace("../index.html");
+        return;
+      }
+    } catch (err) {
+      window.location.replace("../index.html");
+      return;
+    }
+  }
 
   async function initSessionControls() {
     const userBadge = document.getElementById("userBadge");
@@ -12,7 +25,10 @@
     if (btnLogout) {
       btnLogout.addEventListener("click", async () => {
         if (IS_LOCAL_FILE) {
-          location.href = "login/index.html";
+          try {
+            sessionStorage.removeItem(LOCAL_AUTH_KEY);
+          } catch (err) {}
+          window.location.replace("../index.html");
           return;
         }
         try {
@@ -26,16 +42,25 @@
         } catch (err) {
           console.warn("Logout request failed:", err);
         }
-        window.location.replace("/login/");
+        window.location.replace("/");
       });
     }
 
-    if (IS_LOCAL_FILE) return;
+    if (IS_LOCAL_FILE) {
+      try {
+        const localUser = sessionStorage.getItem(LOCAL_AUTH_KEY);
+        if (localUser && userBadge) {
+          userBadge.textContent = localUser;
+          userBadge.hidden = false;
+        }
+      } catch (err) {}
+      return;
+    }
 
     try {
       const res = await fetch("/api/session", { cache: "no-store" });
-      if (res.status === 401) {
-        window.location.replace("/login/");
+      if (res.status === 401 || res.status === 404) {
+        window.location.replace("/");
         return;
       }
       if (res.ok) {
@@ -44,11 +69,11 @@
           userBadge.textContent = data.user;
           userBadge.hidden = false;
         } else if (!data?.authenticated) {
-          window.location.replace("/login/");
+          window.location.replace("/");
         }
       }
     } catch (err) {
-      // Allow static preview if worker API is not mounted (e.g. plain static file server)
+      // Allow offline field usage after initial page load if network drops temporarily
       console.warn("Session endpoint unreachable:", err);
     }
   }

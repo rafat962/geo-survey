@@ -230,20 +230,20 @@ export default {
       ) {
         headers.set("Content-Type", "application/json; charset=utf-8");
         return new Response(
-          JSON.stringify({ success: true, redirect: "/login/" }),
+          JSON.stringify({ success: true, redirect: "/" }),
           { status: 200, headers }
         );
       }
 
-      headers.set("Location", "/login/");
+      headers.set("Location", "/");
       return new Response(null, { status: 302, headers });
     }
 
-    // Normalize /login -> /login/
-    if (pathname === "/login") {
+    // Normalize /app -> /app/
+    if (pathname === "/app") {
       return new Response(null, {
         status: 302,
-        headers: { Location: "/login/" }
+        headers: { Location: "/app/" }
       });
     }
 
@@ -251,23 +251,38 @@ export default {
     const token = getCookie(request, "auth_token");
     const user = await verifyToken(token, secretKeyStr, USERS);
 
-    const isLoginRoute =
-      pathname === "/login/" || pathname.startsWith("/login/");
-    const isPublicAsset = isLoginRoute || pathname === "/favicon.ico";
-
-    // Redirect unauthenticated users to /login/
-    if (!user && !isPublicAsset) {
+    // Redirect legacy /login routes to / (or /app/ when already authenticated)
+    if (
+      pathname === "/login" ||
+      pathname === "/login/" ||
+      pathname === "/login/index.html"
+    ) {
       return new Response(null, {
         status: 302,
-        headers: { Location: "/login/" }
+        headers: { Location: user ? "/app/" : "/" }
       });
     }
 
-    // Redirect already-authenticated users away from /login/ back to /
-    if (user && (pathname === "/login/" || pathname === "/login/index.html")) {
+    const isPublicAsset =
+      pathname === "/" ||
+      pathname === "/index.html" ||
+      pathname === "/css/login.css" ||
+      pathname === "/js/login.js" ||
+      pathname === "/favicon.ico";
+
+    // Redirect unauthenticated users to login page (/)
+    if (!user && !isPublicAsset) {
       return new Response(null, {
         status: 302,
         headers: { Location: "/" }
+      });
+    }
+
+    // Redirect already-authenticated users from login (/) to the map app (/app/)
+    if (user && (pathname === "/" || pathname === "/index.html")) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "/app/" }
       });
     }
 

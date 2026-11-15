@@ -4,6 +4,7 @@
 
 (function () {
   const REMEMBER_KEY = "fieldAppRememberUser";
+  const LOCAL_AUTH_KEY = "fieldAppLocalAuth";
   const IS_LOCAL_FILE = location.protocol === "file:";
 
   const form = document.getElementById("loginForm");
@@ -27,13 +28,20 @@
 
   // Redirect automatically if session is already valid
   async function checkExistingSession() {
-    if (IS_LOCAL_FILE) return;
+    if (IS_LOCAL_FILE) {
+      try {
+        if (sessionStorage.getItem(LOCAL_AUTH_KEY)) {
+          window.location.replace("app/index.html");
+        }
+      } catch (err) {}
+      return;
+    }
     try {
       const res = await fetch("/api/session", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         if (data && data.authenticated) {
-          window.location.replace("/");
+          window.location.replace("/app/");
         }
       }
     } catch (err) {}
@@ -85,7 +93,15 @@
     }
 
     if (IS_LOCAL_FILE) {
-      window.location.href = "../index.html";
+      try {
+        if (remember) {
+          localStorage.setItem(REMEMBER_KEY, username);
+        } else {
+          localStorage.removeItem(REMEMBER_KEY);
+        }
+        sessionStorage.setItem(LOCAL_AUTH_KEY, username);
+      } catch (err) {}
+      window.location.href = "app/index.html";
       return;
     }
 
@@ -112,7 +128,12 @@
           }
         } catch (err) {}
 
-        window.location.replace("/");
+        window.location.replace("/app/");
+        return;
+      }
+
+      if (res.status === 404 || res.status === 405 || res.status === 501) {
+        showError("خادم التحقق (/api/login) غير متاح، يرجى تشغيل التطبيق عبر Cloudflare Worker");
         return;
       }
 
