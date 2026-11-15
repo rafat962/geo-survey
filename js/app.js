@@ -140,6 +140,7 @@
       bottomSheet: document.getElementById("bottomSheet"),
       sheetTitle: document.getElementById("sheetTitle"),
       sheetStatusBadge: document.getElementById("sheetStatusBadge"),
+      btnSheetGoogleMaps: document.getElementById("btnSheetGoogleMaps"),
       btnCloseSheet: document.getElementById("btnCloseSheet"),
       pointForm: document.getElementById("pointForm"),
       fieldCommitteeDecision: document.getElementById("fieldCommitteeDecision"),
@@ -1149,11 +1150,25 @@
 
       const attrs = fullGraphic.attributes || {};
       const orderVal = getStopOrderValue(attrs) ?? "--";
+      const pointCode = getCleanPointCode(attrs);
       const completed = isCompletedStatus(getStopStatusValue(attrs));
 
-      els.sheetTitle.textContent = `محطة رقم #${orderVal}`;
+      els.sheetTitle.textContent = pointCode
+        ? `محطة #${orderVal} (${pointCode})`
+        : `محطة رقم #${orderVal}`;
       els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
       els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
+
+      if (els.btnSheetGoogleMaps) {
+        const pointCoords = extractLatLng(fullGraphic.geometry || graphic.geometry);
+        if (pointCoords) {
+          els.btnSheetGoogleMaps.href = `https://www.google.com/maps/dir/?api=1&destination=${pointCoords.lat},${pointCoords.lng}`;
+          els.btnSheetGoogleMaps.hidden = false;
+        } else {
+          els.btnSheetGoogleMaps.href = "#";
+          els.btnSheetGoogleMaps.hidden = true;
+        }
+      }
 
       populateFixedFormFields(attrs);
       loadExistingAttachments(oid);

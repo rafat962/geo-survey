@@ -567,14 +567,49 @@ body {
 .sheet-title-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .sheet-title {
   margin: 0;
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 800;
+}
+
+.sheet-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-sheet-maps {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: var(--accent-blue);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.btn-sheet-maps:active {
+  transform: scale(0.96);
+  background: var(--accent-blue-dark);
+}
+
+.btn-sheet-maps[hidden] {
+  display: none;
 }
 
 .status-badge {

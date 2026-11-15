@@ -141,9 +141,21 @@
         <h2 id="sheetTitle" class="sheet-title">نقطة رقم --</h2>
         <span id="sheetStatusBadge" class="status-badge pending">قيد الانتظار</span>
       </div>
-      <button id="btnCloseSheet" class="btn-close-sheet" type="button" aria-label="إغلاق">
-        ✕
-      </button>
+      <div class="sheet-header-actions">
+        <a
+          id="btnSheetGoogleMaps"
+          class="btn-sheet-maps"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+          hidden
+        >
+          🗺️ خرائط جوجل
+        </a>
+        <button id="btnCloseSheet" class="btn-close-sheet" type="button" aria-label="إغلاق">
+          ✕
+        </button>
+      </div>
     </div>
 
     <form id="pointForm" class="sheet-body" novalidate>
