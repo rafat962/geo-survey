@@ -8,7 +8,7 @@ const POINTS_LAYER_URL =
 
 // رابط طبقة المسار (اختياري) - في حال تركه فارغاً يتم رسم خط متقطع تلقائياً بين النقاط مرتبة تصاعدياً
 const ROUTE_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/route/FeatureServer/0";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/route4/FeatureServer/0";
 
 // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
