@@ -789,7 +789,7 @@
       }
     }
 
-    // --- Photo Selection & Canvas Compression ---
+    // --- Photo Selection, Date/Location Watermark & Canvas Compression ---
     els.btnPickPhoto.addEventListener("click", () => {
       els.photoInput.click();
     });
@@ -801,19 +801,28 @@
       if (!file) return;
 
       hideFormError();
+      const watermarkEnabled =
+        typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.enabled;
 
       try {
-        if (IMAGE_COMPRESSION.enabled) {
-          const compressed = await compressImage(
-            file,
-            IMAGE_COMPRESSION.maxWidth,
-            IMAGE_COMPRESSION.quality
-          );
-          compressedPhotoBlob = compressed.blob;
+        if (IMAGE_COMPRESSION.enabled || watermarkEnabled) {
+          els.photoSizeInfo.textContent = "جاري معالجة الصورة وختم الموقع...";
+          const watermarkInfo = watermarkEnabled
+            ? await buildWatermarkInfo()
+            : null;
+
+          const processed = await processPhotoOnCanvas(file, {
+            maxWidth: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.maxWidth : Infinity,
+            quality: IMAGE_COMPRESSION.enabled ? IMAGE_COMPRESSION.quality : 0.92,
+            watermarkInfo
+          });
+
+          compressedPhotoBlob = processed.blob;
           compressedPhotoFilename = buildJpgFilename(file.name);
-          els.photoPreviewImg.src = compressed.dataUrl;
-          els.photoSizeInfo.textContent =
-            `تم الضغط: ${formatBytes(compressed.compressedSize)} (بدلاً من ${formatBytes(compressed.originalSize)})`;
+          els.photoPreviewImg.src = processed.dataUrl;
+          els.photoSizeInfo.textContent = IMAGE_COMPRESSION.enabled
+            ? `تم الضغط والختم: ${formatBytes(processed.compressedSize)} (بدلاً من ${formatBytes(processed.originalSize)})`
+            : `تم ختم التاريخ والموقع (${formatBytes(processed.compressedSize)})`;
         } else {
           compressedPhotoBlob = file;
           compressedPhotoFilename = file.name || "field_photo.jpg";
@@ -823,7 +832,7 @@
 
         els.photoPreviewWrap.classList.add("visible");
       } catch (err) {
-        console.error("Image compression error:", err);
+        console.error("Image processing error:", err);
         showFormError("تعذر معالجة الصورة المختارة. يرجى المحاولة بصورة أخرى.");
         resetPhotoState();
       }
@@ -842,7 +851,151 @@
       return `${base}.jpg`;
     }
 
-    function compressImage(file, maxWidth, quality) {
+    function extractLatLng(geom) {
+      if (!geom) return null;
+      if (typeof geom.latitude === "number" && typeof geom.longitude === "number") {
+        return { lat: geom.latitude, lng: geom.longitude };
+      }
+      if (
+        geom.spatialReference?.isWGS84 &&
+        typeof geom.y === "number" &&
+        typeof geom.x === "number"
+      ) {
+        return { lat: geom.y, lng: geom.x };
+      }
+      if (
+        geom.spatialReference?.isWebMercator &&
+        typeof geom.y === "number" &&
+        typeof geom.x === "number"
+      ) {
+        const lng = (geom.x / 20037508.34) * 180;
+        let lat = (geom.y / 20037508.34) * 180;
+        lat =
+          (180 / Math.PI) *
+          (2 * Math.atan(Math.exp((lat * Math.PI) / 180)) - Math.PI / 2);
+        return { lat, lng };
+      }
+      return null;
+    }
+
+    function getBrowserGeolocationOnce(timeoutMs = 2500) {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) {
+          resolve(null);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: Math.round(pos.coords.accuracy || 0),
+              source: "GPS"
+            });
+          },
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 15000 }
+        );
+      });
+    }
+
+    async function resolvePhotoLocation() {
+      const trackCoords = extractLatLng(track?.graphic?.geometry);
+      if (trackCoords) {
+        return { ...trackCoords, source: "GPS" };
+      }
+
+      const browserCoords = await getBrowserGeolocationOnce(2500);
+      if (browserCoords) {
+        return browserCoords;
+      }
+
+      const featureCoords = extractLatLng(activeFeature?.geometry);
+      if (featureCoords) {
+        return { ...featureCoords, source: "Point" };
+      }
+
+      return null;
+    }
+
+    function formatWatermarkTimestamp(date) {
+      const pad = (n) => String(n).padStart(2, "0");
+      const yyyy = date.getFullYear();
+      const mm = pad(date.getMonth() + 1);
+      const dd = pad(date.getDate());
+      const hh = pad(date.getHours());
+      const min = pad(date.getMinutes());
+      const sec = pad(date.getSeconds());
+      return `${yyyy}-${mm}-${dd}  ${hh}:${min}:${sec}`;
+    }
+
+    async function buildWatermarkInfo() {
+      const location = await resolvePhotoLocation();
+      const timestamp = formatWatermarkTimestamp(new Date());
+      const includeOrder =
+        typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.includePointOrder;
+      const orderNum = activeFeature?.attributes?.[FIELDS.order];
+
+      const lines = [];
+      if (includeOrder && orderNum !== undefined && orderNum !== null) {
+        lines.push(`Stop #${orderNum}  |  ${timestamp}`);
+      } else {
+        lines.push(timestamp);
+      }
+
+      if (location) {
+        const latStr = location.lat.toFixed(6);
+        const lngStr = location.lng.toFixed(6);
+        const accStr =
+          typeof location.accuracy === "number" && location.accuracy > 0
+            ? ` (±${location.accuracy}m)`
+            : "";
+        lines.push(`${location.source}: ${latStr}, ${lngStr}${accStr}`);
+      } else {
+        lines.push("Location: Unavailable");
+      }
+
+      return lines;
+    }
+
+    function drawPhotoWatermark(ctx, width, height, lines) {
+      if (!Array.isArray(lines) || lines.length === 0) return;
+
+      const fontSize = Math.max(15, Math.round(width * 0.025));
+      const lineHeight = Math.round(fontSize * 1.42);
+      const padX = Math.max(14, Math.round(width * 0.022));
+      const padY = Math.max(10, Math.round(fontSize * 0.65));
+      const bannerHeight = lines.length * lineHeight + padY * 2;
+
+      ctx.save();
+      ctx.direction = "ltr";
+      ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+
+      // Semi-transparent dark bottom banner for guaranteed legibility on bright/dark photos
+      const grad = ctx.createLinearGradient(0, height - bannerHeight - 16, 0, height);
+      grad.addColorStop(0, "rgba(15, 23, 42, 0)");
+      grad.addColorStop(0.25, "rgba(15, 23, 42, 0.72)");
+      grad.addColorStop(1, "rgba(15, 23, 42, 0.88)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, height - bannerHeight - 16, width, bannerHeight + 16);
+
+      ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 1;
+      ctx.fillStyle = "#ffffff";
+
+      const startY = height - bannerHeight + padY;
+      lines.forEach((line, idx) => {
+        ctx.fillText(line, padX, startY + idx * lineHeight);
+      });
+      ctx.restore();
+    }
+
+    function processPhotoOnCanvas(file, options) {
+      const { maxWidth, quality, watermarkInfo } = options;
+
       return new Promise((resolve, reject) => {
         const objectUrl = URL.createObjectURL(file);
         const img = new Image();
@@ -858,7 +1011,7 @@
           let targetWidth = img.naturalWidth || img.width;
           let targetHeight = img.naturalHeight || img.height;
 
-          if (targetWidth > maxWidth) {
+          if (Number.isFinite(maxWidth) && targetWidth > maxWidth) {
             const ratio = maxWidth / targetWidth;
             targetWidth = maxWidth;
             targetHeight = Math.round(targetHeight * ratio);
@@ -870,6 +1023,10 @@
 
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          if (watermarkInfo) {
+            drawPhotoWatermark(ctx, targetWidth, targetHeight, watermarkInfo);
+          }
 
           const dataUrl = canvas.toDataURL("image/jpeg", quality);
           canvas.toBlob(

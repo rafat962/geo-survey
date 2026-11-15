@@ -22,11 +22,17 @@ const STATUS_VALUES = {
   completed: "Completed"
 };
 
-// إعدادات ضغط الصور قبل الرفع عبر شبكة الجوال
+// إعدادات ضغط الصور وختم التاريخ والموقع قبل الرفع عبر شبكة الجوال
 const IMAGE_COMPRESSION = {
   enabled: true,
   maxWidth: 1280,
   quality: 0.8
+};
+
+// كتابة التاريخ والوقت والإحداثيات على الصورة الملتقطة تلقائياً
+const IMAGE_WATERMARK = {
+  enabled: true,
+  includePointOrder: true
 };
 
 // إعدادات الخريطة الافتراضية (يتم التقريب تلقائياً إلى حدود النقاط عند التحميل)
