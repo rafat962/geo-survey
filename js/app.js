@@ -435,7 +435,7 @@
       const routeGraphic = new Graphic({
         geometry: polyline,
         symbol: new SimpleLineSymbol({
-          color: [37, 99, 235, 0.85],
+          color: [56, 189, 248, 0.95],
           width: 3.5,
           style: "dash"
         })

@@ -31,7 +31,7 @@ const IMAGE_COMPRESSION = {
 
 // إعدادات الخريطة الافتراضية (يتم التقريب تلقائياً إلى حدود النقاط عند التحميل)
 const MAP_CONFIG = {
-  basemap: "streets-navigation-vector",
+  basemap: "hybrid", // صور فضائية مع أسماء الشوارع (أو "satellite" لصور فضائية فقط بدون أسماء)
   defaultCenter: [46.6753, 24.7136], // [خط الطول, دائرة العرض]
   defaultZoom: 12
 };
