@@ -142,7 +142,6 @@
       sheetStatusBadge: document.getElementById("sheetStatusBadge"),
       btnCloseSheet: document.getElementById("btnCloseSheet"),
       pointForm: document.getElementById("pointForm"),
-      fieldHandoverDate: document.getElementById("fieldHandoverDate"),
       fieldCommitteeDecision: document.getElementById("fieldCommitteeDecision"),
       fieldHasBase: document.getElementById("fieldHasBase"),
       fieldNotesObstacles: document.getElementById("fieldNotesObstacles"),
@@ -725,6 +724,7 @@
       const nowMs = Date.now();
       const samplePoints = [
         {
+          name: "1. UN-009",
           order: 1,
           status: STATUS_VALUES.completed,
           date: nowMs - 86400000,
@@ -733,6 +733,7 @@
           notes: "تم الاستلام والموقع جاهز"
         },
         {
+          name: "2. MG-095",
           order: 2,
           status: STATUS_VALUES.completed,
           date: nowMs - 86400000,
@@ -740,10 +741,10 @@
           hasBase: "نعم",
           notes: "يحتاج تسوية بسيطة بالرصيف"
         },
-        { order: 3, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { order: 4, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { order: 5, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { order: 6, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" }
+        { name: "3. UN-080", order: 3, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "4. UN-040", order: 4, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "5. MG-092", order: 5, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "6. MG-116", order: 6, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" }
       ];
 
       const sourceGraphics = samplePoints.map((pt, idx) => {
@@ -756,6 +757,7 @@
           }),
           attributes: {
             OBJECTID: idx + 1,
+            [FIELDS.name || "Name"]: pt.name,
             [FIELDS.order]: pt.order,
             [FIELDS.status]: pt.status,
             [FIELDS.actualHandoverDate]: pt.date,
@@ -773,6 +775,7 @@
         spatialReference: { wkid: 4326 },
         fields: [
           { name: "OBJECTID", alias: "OBJECTID", type: "oid" },
+          { name: FIELDS.name || "Name", alias: "Name", type: "string", length: 100, editable: false },
           { name: FIELDS.order, alias: "رقم المحطة", type: "integer", editable: false },
           { name: FIELDS.status, alias: "الحالة", type: "string", editable: true },
           { name: FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
@@ -1125,36 +1128,6 @@
       "رفض استلام الموقع لوجود عائق يمنع التنفيذ"
     ]);
 
-    function getTodayLocalDateStr() {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function epochToLocalDateStr(epochVal) {
-      if (epochVal === null || epochVal === undefined || epochVal === "") return "";
-      const d = new Date(epochVal);
-      if (Number.isNaN(d.getTime())) return "";
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      return `${yyyy}-${mm}-${dd}`;
-    }
-
-    function localDateStrToEpoch(dateStr) {
-      if (!dateStr) return null;
-      const parts = String(dateStr).split("-");
-      if (parts.length !== 3) return null;
-      const year = Number(parts[0]);
-      const month = Number(parts[1]);
-      const day = Number(parts[2]);
-      if (!year || !month || !day) return null;
-      // Local noon prevents UTC offset shifts from changing the calendar date
-      return new Date(year, month - 1, day, 12, 0, 0).getTime();
-    }
-
     function syncNotesRequirement() {
       const decision = els.fieldCommitteeDecision.value;
       const needsNotes = DECISIONS_REQUIRING_NOTES.has(decision);
@@ -1201,13 +1174,9 @@
     els.sheetBackdrop.addEventListener("click", closeBottomSheet);
 
     function populateFixedFormFields(attrs) {
-      const dateField = FIELDS.actualHandoverDate || "actual_handover_date";
       const decisionField = FIELDS.committeeDecision || "committee_decision";
       const hasBaseField = FIELDS.hasBase || "has_base";
       const notesField = FIELDS.notesObstacles || "notes_obstacles";
-
-      const savedDateStr = epochToLocalDateStr(attrs[dateField]);
-      els.fieldHandoverDate.value = savedDateStr || getTodayLocalDateStr();
 
       const savedDecision = attrs[decisionField];
       els.fieldCommitteeDecision.value = savedDecision ? String(savedDecision) : "";
@@ -1455,15 +1424,41 @@
       return `${yyyy}-${mm}-${dd}  ${hh}:${min}:${sec}`;
     }
 
+    function getCleanPointCode(attrs) {
+      if (!attrs) return "";
+      const targetName = (typeof FIELDS !== "undefined" && FIELDS.name) || "Name";
+      let raw = attrs[targetName];
+      if (raw === undefined || raw === null || raw === "") {
+        const ciKey = Object.keys(attrs).find(
+          (k) => k.toLowerCase() === targetName.toLowerCase()
+        );
+        raw = ciKey ? attrs[ciKey] : "";
+      }
+      if (raw === undefined || raw === null) return "";
+      // Strip leading index + dot/whitespace (e.g. "1. UN-009", "35. MO-056" -> "UN-009", "MO-056")
+      return String(raw)
+        .trim()
+        .replace(/^\d+(?:\s*\.\s*|\s+)/, "")
+        .trim();
+    }
+
     async function buildWatermarkInfo() {
       const location = await resolvePhotoLocation();
       const timestamp = formatWatermarkTimestamp(new Date());
       const includeOrder =
         typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.includePointOrder;
       const orderNum = getStopOrderValue(activeFeature?.attributes);
+      const pointCode = getCleanPointCode(activeFeature?.attributes);
 
       const lines = [];
-      if (includeOrder && orderNum !== undefined && orderNum !== null) {
+      if (pointCode) {
+        if (includeOrder && orderNum !== undefined && orderNum !== null) {
+          lines.push(`${pointCode}  |  Stop #${orderNum}`);
+        } else {
+          lines.push(pointCode);
+        }
+        lines.push(timestamp);
+      } else if (includeOrder && orderNum !== undefined && orderNum !== null) {
         lines.push(`Stop #${orderNum}  |  ${timestamp}`);
       } else {
         lines.push(timestamp);
@@ -1590,16 +1585,9 @@
 
       hideFormError();
 
-      const handoverDateStr = els.fieldHandoverDate.value;
       const committeeDecision = els.fieldCommitteeDecision.value;
       const hasBase = els.fieldHasBase.value;
       const notesObstacles = els.fieldNotesObstacles.value.trim();
-
-      if (!handoverDateStr) {
-        showFormError("يرجى تحديد تاريخ الاستلام الفعلي.");
-        els.fieldHandoverDate.focus();
-        return;
-      }
 
       if (!committeeDecision) {
         showFormError("يرجى اختيار قرار لجنة التسليم.");
@@ -1632,7 +1620,7 @@
 
         const statusField = activeStatusField || FIELDS.status || "status";
         updatedGraphic.attributes[oidField] = activeFeature.attributes[oidField];
-        updatedGraphic.attributes[dateField] = localDateStrToEpoch(handoverDateStr);
+        updatedGraphic.attributes[dateField] = Date.now();
         updatedGraphic.attributes[decisionField] = committeeDecision;
         updatedGraphic.attributes[hasBaseField] = hasBase;
         updatedGraphic.attributes[notesField] = notesObstacles;
