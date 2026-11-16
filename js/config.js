@@ -4,11 +4,11 @@
 
 // رابط طبقة النقاط (ArcGIS Hosted Feature Layer) - يجب أن ينتهي بـ /FeatureServer/0
 const POINTS_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Points_Data/FeatureServer/0";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/sharq_area/FeatureServer/10";
 
 // رابط طبقة المسار (اختياري) - في حال تركه فارغاً يتم رسم خط متقطع تلقائياً بين النقاط مرتبة تصاعدياً
 const ROUTE_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/route4/FeatureServer/0";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/sharq_area/FeatureServer/9";
 
 // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
