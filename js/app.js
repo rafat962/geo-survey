@@ -120,14 +120,6 @@
       progressText: document.getElementById("progressText"),
       progressPercent: document.getElementById("progressPercent"),
       progressFill: document.getElementById("progressFill"),
-      nextBanner: document.getElementById("nextBanner"),
-      nextHeaderRow: document.getElementById("nextHeaderRow"),
-      nextTitle: document.getElementById("nextTitle"),
-      nextSubtitle: document.getElementById("nextSubtitle"),
-      btnZoomNext: document.getElementById("btnZoomNext"),
-      nextActionsRow: document.getElementById("nextActionsRow"),
-      btnOpenNextForm: document.getElementById("btnOpenNextForm"),
-      btnGoogleMaps: document.getElementById("btnGoogleMaps"),
       btnFullscreen: document.getElementById("btnFullscreen"),
       fullscreenIcon: document.getElementById("fullscreenIcon"),
       btnMyLocation: document.getElementById("btnMyLocation"),
@@ -162,17 +154,13 @@
     // --- State ---
     let pointsLayer = null;
     let routeLayer = null;
-    let activeSegmentLayer = new GraphicsLayer({ id: "active-next-segment" });
-    let highlightLayer = new GraphicsLayer({ id: "next-point-highlight" });
     let activeOrderField = FIELDS.order || "Sequence";
     let activeStatusField = FIELDS.status || "status";
     let cachedFeatures = [];
-    let nextPendingFeature = null;
     let activeFeature = null;
     let selectedPhotos = [];
     let photoIdCounter = 0;
     let isDemoMode = false;
-    let pulseIntervalId = null;
     let initialZoomDone = false;
     let toastTimer = null;
 
@@ -193,7 +181,7 @@
         autoOpenEnabled: false
       },
       padding: {
-        top: 150,
+        top: 74,
         bottom: 36,
         left: 8,
         right: 8
@@ -246,16 +234,6 @@
     track.on("track-error", (evt) => {
       console.warn("GPS track error:", evt?.error);
     });
-
-    // Re-draw active GPS -> Next Stop segment & distance as the field worker moves
-    reactiveUtils.watch(
-      () => track.graphic?.geometry,
-      () => {
-        if (nextPendingFeature) {
-          updateNextStopDistanceAndSegment();
-        }
-      }
-    );
 
     // --- Symbology & Labeling ---
     function getRouteLineSymbol() {
@@ -657,7 +635,7 @@
         });
       }
 
-      map.addMany([routeLayer, activeSegmentLayer, highlightLayer, pointsLayer]);
+      map.addMany([routeLayer, pointsLayer]);
 
       if (routeLayer && routeLayer.type === "feature") {
         routeLayer
@@ -713,8 +691,6 @@
             ? `مشكلة توكن ArcGIS: ${tokenError}`
             : err?.message || "تأكد من رابط الطبقة وصلاحيات الوصول";
           els.progressText.textContent = "تعذر تحميل طبقة النقاط";
-          els.nextTitle.textContent = "خطأ في تحميل الطبقة";
-          els.nextSubtitle.textContent = reason;
           showToast(`فشل تحميل طبقة النقاط: ${reason}`, "error", 7000);
         });
     }
@@ -805,7 +781,6 @@
       cachedFeatures = sortFeaturesByOrder(featureSet.features || []);
 
       updateProgressUI(cachedFeatures);
-      updateNextPendingPoint(cachedFeatures);
 
       if (!ROUTE_LAYER_URL || ROUTE_LAYER_URL.trim() === "") {
         drawAutoRoute(cachedFeatures);
@@ -847,127 +822,18 @@
       els.progressFill.style.width = `${pct}%`;
     }
 
-    function calcDistanceMeters(fromCoords, toCoords) {
-      if (!fromCoords || !toCoords) return null;
-      const R = 6371000;
-      const toRad = (deg) => (deg * Math.PI) / 180;
-      const dLat = toRad(toCoords.lat - fromCoords.lat);
-      const dLon = toRad(toCoords.lng - fromCoords.lng);
-      const lat1 = toRad(fromCoords.lat);
-      const lat2 = toRad(toCoords.lat);
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
-
-    function formatDistanceArabic(meters) {
-      if (meters === null || !Number.isFinite(meters)) return null;
-      if (meters < 1000) return `${Math.round(meters)} متر`;
-      return `${(meters / 1000).toFixed(2)} كم`;
-    }
-
-    function getLastCompletedFeature(sortedFeatures) {
-      const completedList = sortedFeatures.filter((f) =>
-        isCompletedStatus(getStopStatusValue(f.attributes))
-      );
-      return completedList.length > 0
-        ? completedList[completedList.length - 1]
-        : null;
-    }
-
-    function updateNextStopDistanceAndSegment() {
-      activeSegmentLayer.removeAll();
-      if (!nextPendingFeature || !nextPendingFeature.geometry) return;
-
-      const targetCoords = extractLatLng(nextPendingFeature.geometry);
+    function buildGoogleMapsDirectionsUrl(destCoords) {
+      if (!destCoords) return "#";
+      const params = new URLSearchParams({
+        api: "1",
+        destination: `${destCoords.lat},${destCoords.lng}`,
+        travelmode: "driving"
+      });
       const gpsCoords = extractLatLng(track?.graphic?.geometry);
-
-      if (gpsCoords && targetCoords) {
-        const distLabel = formatDistanceArabic(
-          calcDistanceMeters(gpsCoords, targetCoords)
-        );
-        els.nextSubtitle.textContent = `المسافة من موقعك: ${distLabel}`;
-      } else {
-        els.nextSubtitle.textContent = "اضغط لفتح البيانات أو التوجيه عبر خرائط جوجل";
+      if (gpsCoords) {
+        params.set("origin", `${gpsCoords.lat},${gpsCoords.lng}`);
       }
-
-      // Real ArcGIS street route is already on the map; only draw straight fallback segment if no ROUTE_LAYER_URL is configured
-      if (ROUTE_LAYER_URL && ROUTE_LAYER_URL.trim() !== "") return;
-
-      // Draw active line from live GPS (or last completed stop) to Next Pending Stop when no route layer exists
-      const lastCompleted = getLastCompletedFeature(cachedFeatures);
-      const originCoords = gpsCoords || extractLatLng(lastCompleted?.geometry);
-
-      if (originCoords && targetCoords) {
-        const segmentLine = new Polyline({
-          paths: [
-            [
-              [originCoords.lng, originCoords.lat],
-              [targetCoords.lng, targetCoords.lat]
-            ]
-          ],
-          spatialReference: { wkid: 4326 }
-        });
-
-        activeSegmentLayer.add(
-          new Graphic({
-            geometry: segmentLine,
-            symbol: new SimpleLineSymbol({
-              color: [14, 165, 233, 0.95],
-              width: 6,
-              style: "solid",
-              cap: "round",
-              join: "round"
-            })
-          })
-        );
-      }
-    }
-
-    function updateNextPendingPoint(sortedFeatures) {
-      if (!sortedFeatures || sortedFeatures.length === 0) {
-        nextPendingFeature = null;
-        els.nextBanner.classList.remove("all-done");
-        els.nextTitle.textContent = "لا توجد نقاط في الطبقة";
-        els.nextSubtitle.textContent = "تحقق من بيانات طبقة النقاط أو الصلاحيات";
-        els.btnZoomNext.hidden = true;
-        els.nextActionsRow.hidden = true;
-        activeSegmentLayer.removeAll();
-        clearNextPointHalo();
-        return;
-      }
-
-      nextPendingFeature =
-        sortedFeatures.find((f) => !isCompletedStatus(getStopStatusValue(f.attributes))) || null;
-
-      if (!nextPendingFeature) {
-        els.nextBanner.classList.add("all-done");
-        els.nextTitle.textContent = "تم إنجاز جميع المحطات بنجاح!";
-        els.nextSubtitle.textContent = "لا توجد محطات متبقية في المسار";
-        els.btnZoomNext.hidden = true;
-        els.nextActionsRow.hidden = true;
-        activeSegmentLayer.removeAll();
-        clearNextPointHalo();
-        return;
-      }
-
-      const orderNum = getStopOrderValue(nextPendingFeature.attributes) ?? "--";
-      els.nextBanner.classList.remove("all-done");
-      els.nextTitle.textContent = `المحطة التالية: رقم #${orderNum}`;
-      els.btnZoomNext.hidden = false;
-      els.nextActionsRow.hidden = false;
-
-      const targetCoords = extractLatLng(nextPendingFeature.geometry);
-      if (targetCoords) {
-        els.btnGoogleMaps.href = `https://www.google.com/maps/dir/?api=1&destination=${targetCoords.lat},${targetCoords.lng}`;
-      } else {
-        els.btnGoogleMaps.href = "#";
-      }
-
-      updateNextStopDistanceAndSegment();
-      renderPulsingHalo(nextPendingFeature.geometry);
+      return `https://www.google.com/maps/dir/?${params.toString()}`;
     }
 
     function drawAutoRoute(sortedFeatures) {
@@ -997,65 +863,6 @@
       routeLayer.add(routeGraphic);
     }
 
-    function clearNextPointHalo() {
-      if (pulseIntervalId) {
-        clearInterval(pulseIntervalId);
-        pulseIntervalId = null;
-      }
-      highlightLayer.removeAll();
-    }
-
-    function renderPulsingHalo(geometry) {
-      clearNextPointHalo();
-      if (!geometry) return;
-
-      const outerRing = new Graphic({
-        geometry: geometry,
-        symbol: new SimpleMarkerSymbol({
-          style: "circle",
-          color: [251, 146, 60, 0.22],
-          size: "50px",
-          outline: {
-            color: [249, 115, 22, 0.95],
-            width: 3
-          }
-        })
-      });
-
-      const pulseRing = new Graphic({
-        geometry: geometry,
-        symbol: new SimpleMarkerSymbol({
-          style: "circle",
-          color: [251, 146, 60, 0],
-          size: "38px",
-          outline: {
-            color: [249, 115, 22, 0.9],
-            width: 3
-          }
-        })
-      });
-
-      highlightLayer.addMany([outerRing, pulseRing]);
-
-      let step = 0;
-      pulseIntervalId = setInterval(() => {
-        step = (step + 1) % 30;
-        const progress = step / 30;
-        const sizePx = 34 + progress * 34;
-        const alpha = Math.max(0, 0.95 * (1 - progress));
-
-        pulseRing.symbol = new SimpleMarkerSymbol({
-          style: "circle",
-          color: [251, 146, 60, 0],
-          size: `${sizePx.toFixed(1)}px`,
-          outline: {
-            color: [249, 115, 22, alpha],
-            width: 3
-          }
-        });
-      }, 55);
-    }
-
     function zoomToAllPoints() {
       const geometries = cachedFeatures.map((f) => f.geometry).filter(Boolean);
       if (geometries.length === 0) return;
@@ -1068,27 +875,7 @@
       view.goTo(target, { duration: 650, easing: "ease-out" }).catch(() => {});
     }
 
-    function zoomToNextPendingStop() {
-      if (!nextPendingFeature || !nextPendingFeature.geometry) return;
-      view
-        .goTo(
-          { target: nextPendingFeature.geometry, zoom: Math.max(view.zoom, 17) },
-          { duration: 700 }
-        )
-        .catch(() => {});
-    }
-
     // --- Map Interactions & Floating Buttons ---
-    els.btnZoomNext.addEventListener("click", zoomToNextPendingStop);
-    els.nextHeaderRow.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      zoomToNextPendingStop();
-    });
-
-    els.btnOpenNextForm.addEventListener("click", () => {
-      if (!nextPendingFeature) return;
-      openBottomSheet(nextPendingFeature);
-    });
 
     els.btnMyLocation.addEventListener("click", () => {
       if (track.graphic && track.graphic.geometry) {
@@ -1162,7 +949,7 @@
       if (els.btnSheetGoogleMaps) {
         const pointCoords = extractLatLng(fullGraphic.geometry || graphic.geometry);
         if (pointCoords) {
-          els.btnSheetGoogleMaps.href = `https://www.google.com/maps/dir/?api=1&destination=${pointCoords.lat},${pointCoords.lng}`;
+          els.btnSheetGoogleMaps.href = buildGoogleMapsDirectionsUrl(pointCoords);
           els.btnSheetGoogleMaps.hidden = false;
         } else {
           els.btnSheetGoogleMaps.href = "#";
@@ -1175,6 +962,16 @@
 
       els.sheetBackdrop.classList.add("open");
       els.bottomSheet.classList.add("open");
+    }
+
+    if (els.btnSheetGoogleMaps) {
+      els.btnSheetGoogleMaps.addEventListener("click", () => {
+        if (!activeFeature) return;
+        const pointCoords = extractLatLng(activeFeature.geometry);
+        if (pointCoords) {
+          els.btnSheetGoogleMaps.href = buildGoogleMapsDirectionsUrl(pointCoords);
+        }
+      });
     }
 
     function closeBottomSheet() {
@@ -1732,8 +1529,6 @@
     } else {
       els.setupModal.hidden = false;
       els.progressText.textContent = "بانتظار إعداد رابط الطبقة";
-      els.nextTitle.textContent = "لم يتم ضبط POINTS_LAYER_URL";
-      els.nextSubtitle.textContent = "اختر الوضع التجريبي أو أضف الرابط في js/config.js";
 
       els.btnStartDemo.addEventListener("click", () => {
         els.setupModal.hidden = true;
