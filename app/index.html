@@ -180,8 +180,15 @@
       </div>
 
       <div id="existingPhotosSection" class="form-field" hidden>
-        <label class="form-label">الصور المرفقة سابقاً</label>
-        <div id="existingPhotosList" class="existing-attachments"></div>
+        <div class="photo-header-row">
+          <label class="form-label">الصور المرفقة سابقاً</label>
+          <span id="existingPhotosCountLabel" class="photo-count-label existing" hidden>0 صور</span>
+        </div>
+        <div id="existingPhotosList" class="photo-gallery"></div>
+        <div id="existingPhotosUndoBar" class="undo-delete-bar" hidden>
+          <span id="existingPhotosDeleteNotice"></span>
+          <button id="btnUndoDeletePhotos" class="btn-undo-delete" type="button">تراجع</button>
+        </div>
       </div>
 
       <!-- Multi-Photo Camera Capture & Queue -->

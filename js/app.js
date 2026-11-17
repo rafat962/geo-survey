@@ -140,7 +140,11 @@
       fieldNotesObstacles: document.getElementById("fieldNotesObstacles"),
       notesRequiredBadge: document.getElementById("notesRequiredBadge"),
       existingPhotosSection: document.getElementById("existingPhotosSection"),
+      existingPhotosCountLabel: document.getElementById("existingPhotosCountLabel"),
       existingPhotosList: document.getElementById("existingPhotosList"),
+      existingPhotosUndoBar: document.getElementById("existingPhotosUndoBar"),
+      existingPhotosDeleteNotice: document.getElementById("existingPhotosDeleteNotice"),
+      btnUndoDeletePhotos: document.getElementById("btnUndoDeletePhotos"),
       photoInput: document.getElementById("photoInput"),
       btnPickPhoto: document.getElementById("btnPickPhoto"),
       photoCountLabel: document.getElementById("photoCountLabel"),
@@ -159,6 +163,8 @@
     let cachedFeatures = [];
     let activeFeature = null;
     let selectedPhotos = [];
+    let existingAttachments = [];
+    let pendingDeleteAttachmentIds = [];
     let photoIdCounter = 0;
     let isDemoMode = false;
     let initialZoomDone = false;
@@ -945,6 +951,7 @@
         : `محطة رقم #${orderVal}`;
       els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
       els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
+      els.submitBtnText.textContent = completed ? "حفظ التعديلات" : "حفظ وإتمام النقطة";
 
       if (els.btnSheetGoogleMaps) {
         const pointCoords = extractLatLng(fullGraphic.geometry || graphic.geometry);
@@ -985,29 +992,144 @@
     els.btnCloseSheet.addEventListener("click", closeBottomSheet);
     els.sheetBackdrop.addEventListener("click", closeBottomSheet);
 
+    function resolveLayerFieldName(preferredName) {
+      const fallback = preferredName || "";
+      const fields = pointsLayer?.fields;
+      if (!Array.isArray(fields) || fields.length === 0 || !fallback) {
+        return fallback;
+      }
+      const match = fields.find(
+        (f) => f.name?.toLowerCase() === fallback.toLowerCase()
+      );
+      return match ? match.name : fallback;
+    }
+
+    function readAttrCaseInsensitive(attrs, preferredName) {
+      if (!attrs || !preferredName) return undefined;
+      const exactKey = resolveLayerFieldName(preferredName);
+      if (attrs[exactKey] !== undefined) return attrs[exactKey];
+      const ciKey = Object.keys(attrs).find(
+        (k) => k.toLowerCase() === preferredName.toLowerCase()
+      );
+      return ciKey ? attrs[ciKey] : undefined;
+    }
+
     function populateFixedFormFields(attrs) {
       const decisionField = FIELDS.committeeDecision || "committee_decision";
       const hasBaseField = FIELDS.hasBase || "has_base";
       const notesField = FIELDS.notesObstacles || "notes_obstacles";
 
-      const savedDecision = attrs[decisionField];
+      const savedDecision = readAttrCaseInsensitive(attrs, decisionField);
       els.fieldCommitteeDecision.value = savedDecision ? String(savedDecision) : "";
 
-      const savedHasBase = attrs[hasBaseField];
+      const savedHasBase = readAttrCaseInsensitive(attrs, hasBaseField);
       els.fieldHasBase.value = savedHasBase ? String(savedHasBase) : "";
 
-      els.fieldNotesObstacles.value = attrs[notesField] ?? "";
+      els.fieldNotesObstacles.value = readAttrCaseInsensitive(attrs, notesField) ?? "";
       syncNotesRequirement();
     }
 
-    async function loadExistingAttachments(objectId) {
-      els.existingPhotosSection.hidden = true;
+    function buildAttachmentAuthUrl(rawUrl) {
+      if (!rawUrl) return "";
+      if (/[?&]token=/i.test(rawUrl)) return rawUrl;
+      try {
+        const cred = IdentityManager.findCredential(rawUrl);
+        if (cred?.token) {
+          const sep = rawUrl.includes("?") ? "&" : "?";
+          return `${rawUrl}${sep}token=${encodeURIComponent(cred.token)}`;
+        }
+      } catch (err) {}
+      return rawUrl;
+    }
+
+    function renderExistingAttachments() {
       els.existingPhotosList.innerHTML = "";
+      const deleteSet = new Set(pendingDeleteAttachmentIds);
+      const visibleAttachments = existingAttachments.filter((att) => !deleteSet.has(att.id));
+      const visibleCount = visibleAttachments.length;
+      const deleteCount = pendingDeleteAttachmentIds.length;
+
+      els.existingPhotosList.hidden = visibleCount === 0;
+      if (els.existingPhotosCountLabel) {
+        els.existingPhotosCountLabel.hidden = visibleCount === 0;
+        els.existingPhotosCountLabel.textContent =
+          visibleCount === 1
+            ? "صورة واحدة"
+            : visibleCount === 2
+              ? "صورتان"
+              : `${visibleCount} صور`;
+      }
+
+      visibleAttachments.forEach((att) => {
+        const card = document.createElement("div");
+        card.className = "photo-thumb-card";
+
+        const imgUrl = buildAttachmentAuthUrl(att.url);
+        const link = document.createElement("a");
+        link.href = imgUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.title = "فتح الصورة بالحجم الكامل";
+
+        const img = document.createElement("img");
+        img.src = imgUrl;
+        img.alt = att.name || "مرفق";
+        img.className = "photo-thumb-img";
+        link.appendChild(img);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "photo-thumb-remove";
+        removeBtn.setAttribute("aria-label", "حذف الصورة المرفقة");
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!pendingDeleteAttachmentIds.includes(att.id)) {
+            pendingDeleteAttachmentIds.push(att.id);
+          }
+          renderExistingAttachments();
+        });
+
+        const badge = document.createElement("div");
+        badge.className = "photo-thumb-size";
+        badge.textContent = att.size ? formatBytes(att.size) : "محفوظة";
+
+        card.appendChild(link);
+        card.appendChild(removeBtn);
+        card.appendChild(badge);
+        els.existingPhotosList.appendChild(card);
+      });
+
+      if (els.existingPhotosUndoBar && els.existingPhotosDeleteNotice) {
+        els.existingPhotosUndoBar.hidden = deleteCount === 0;
+        if (deleteCount > 0) {
+          els.existingPhotosDeleteNotice.textContent =
+            deleteCount === 1
+              ? "تم تحديد صورة واحدة للحذف عند الحفظ"
+              : `تم تحديد ${deleteCount} صور للحذف عند الحفظ`;
+        }
+      }
+
+      els.existingPhotosSection.hidden = visibleCount === 0 && deleteCount === 0;
+    }
+
+    if (els.btnUndoDeletePhotos) {
+      els.btnUndoDeletePhotos.addEventListener("click", () => {
+        pendingDeleteAttachmentIds = [];
+        renderExistingAttachments();
+      });
+    }
+
+    async function loadExistingAttachments(objectId) {
+      existingAttachments = [];
+      pendingDeleteAttachmentIds = [];
+      renderExistingAttachments();
 
       if (
         isDemoMode ||
         !objectId ||
-        !pointsLayer?.capabilities?.data?.supportsAttachment
+        pointsLayer?.capabilities?.data?.supportsAttachment === false
       ) {
         return;
       }
@@ -1017,21 +1139,10 @@
           objectIds: [objectId]
         });
         const attachments = result?.[objectId] || [];
-        if (attachments.length === 0) return;
-
-        attachments.forEach((att) => {
-          if (att.url && /^image\//i.test(att.contentType || "image/")) {
-            const img = document.createElement("img");
-            img.src = att.url;
-            img.alt = att.name || "مرفق";
-            img.className = "existing-attachment-thumb";
-            els.existingPhotosList.appendChild(img);
-          }
-        });
-
-        if (els.existingPhotosList.children.length > 0) {
-          els.existingPhotosSection.hidden = false;
-        }
+        existingAttachments = attachments.filter(
+          (att) => att.url && /^image\//i.test(att.contentType || "image/")
+        );
+        renderExistingAttachments();
       } catch (err) {
         console.warn("Could not load existing attachments:", err);
       }
@@ -1149,8 +1260,11 @@
         }
       });
       selectedPhotos = [];
+      existingAttachments = [];
+      pendingDeleteAttachmentIds = [];
       els.photoInput.value = "";
       renderPhotoGallery();
+      renderExistingAttachments();
     }
 
     function buildJpgFilename(originalName, seq) {
@@ -1419,16 +1533,25 @@
         return;
       }
 
+      const wasAlreadyCompleted = isCompletedStatus(
+        getStopStatusValue(activeFeature.attributes)
+      );
       setSubmittingState(true, "جاري حفظ البيانات...");
 
       try {
         const oidField = pointsLayer.objectIdField || "OBJECTID";
         const updatedGraphic = activeFeature.clone();
 
-        const dateField = FIELDS.actualHandoverDate || "actual_handover_date";
-        const decisionField = FIELDS.committeeDecision || "committee_decision";
-        const hasBaseField = FIELDS.hasBase || "has_base";
-        const notesField = FIELDS.notesObstacles || "notes_obstacles";
+        const dateField = resolveLayerFieldName(
+          FIELDS.actualHandoverDate || "actual_handover_date"
+        );
+        const decisionField = resolveLayerFieldName(
+          FIELDS.committeeDecision || "committee_decision"
+        );
+        const hasBaseField = resolveLayerFieldName(FIELDS.hasBase || "has_base");
+        const notesField = resolveLayerFieldName(
+          FIELDS.notesObstacles || "notes_obstacles"
+        );
 
         const statusField = activeStatusField || FIELDS.status || "status";
         updatedGraphic.attributes[oidField] = activeFeature.attributes[oidField];
@@ -1447,6 +1570,31 @@
           throw new Error(
             featureUpdateRes.error.message || "فشل تحديث بيانات النقطة في الخادم."
           );
+        }
+
+        // Delete any existing attachments marked for removal
+        if (!isDemoMode && pendingDeleteAttachmentIds.length > 0) {
+          setSubmittingState(true, "جاري حذف الصور المحددة...");
+          const delRes = await pointsLayer.deleteAttachments(
+            updatedGraphic,
+            pendingDeleteAttachmentIds
+          );
+          if (delRes?.error) {
+            throw new Error(
+              delRes.error.message || "فشل حذف إحدى الصور المرفقة من الخادم."
+            );
+          }
+          if (Array.isArray(delRes?.deleteAttachmentResults)) {
+            const failedDel = delRes.deleteAttachmentResults.find(
+              (r) => r?.error || r?.success === false
+            );
+            if (failedDel) {
+              throw new Error(
+                failedDel.error?.message || "فشل حذف إحدى الصور المرفقة من الخادم."
+              );
+            }
+          }
+          pendingDeleteAttachmentIds = [];
         }
 
         // Upload all queued photos sequentially
@@ -1485,7 +1633,10 @@
         await loadAndSyncPoints(false);
 
         closeBottomSheet();
-        showToast("تم حفظ وإتمام النقطة بنجاح", "success");
+        showToast(
+          wasAlreadyCompleted ? "تم حفظ تعديلات النقطة بنجاح" : "تم حفظ وإتمام النقطة بنجاح",
+          "success"
+        );
       } catch (err) {
         console.error("Submission error:", err);
         showFormError(
@@ -1494,7 +1645,10 @@
             : "حدث خطأ أثناء الاتصال بالخادم. تحقق من شبكة الجوال وحاول مرة أخرى."
         );
       } finally {
-        setSubmittingState(false, "حفظ وإتمام النقطة");
+        setSubmittingState(
+          false,
+          wasAlreadyCompleted ? "حفظ التعديلات" : "حفظ وإتمام النقطة"
+        );
       }
     });
 
