@@ -152,7 +152,11 @@
       formError: document.getElementById("formError"),
       btnSubmitForm: document.getElementById("btnSubmitForm"),
       submitSpinner: document.getElementById("submitSpinner"),
-      submitBtnText: document.getElementById("submitBtnText")
+      submitBtnText: document.getElementById("submitBtnText"),
+      photoViewerModal: document.getElementById("photoViewerModal"),
+      photoViewerImg: document.getElementById("photoViewerImg"),
+      photoViewerCaption: document.getElementById("photoViewerCaption"),
+      btnClosePhotoViewer: document.getElementById("btnClosePhotoViewer")
     };
 
     // --- State ---
@@ -1065,17 +1069,14 @@
         card.className = "photo-thumb-card";
 
         const imgUrl = buildAttachmentAuthUrl(att.url);
-        const link = document.createElement("a");
-        link.href = imgUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.title = "فتح الصورة بالحجم الكامل";
-
         const img = document.createElement("img");
         img.src = imgUrl;
         img.alt = att.name || "مرفق";
         img.className = "photo-thumb-img";
-        link.appendChild(img);
+        img.title = "اضغط لعرض الصورة بملء الشاشة";
+        img.addEventListener("click", () => {
+          openPhotoViewer(imgUrl, att.name || "صورة مرفقة");
+        });
 
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
@@ -1095,7 +1096,7 @@
         badge.className = "photo-thumb-size";
         badge.textContent = att.size ? formatBytes(att.size) : "محفوظة";
 
-        card.appendChild(link);
+        card.appendChild(img);
         card.appendChild(removeBtn);
         card.appendChild(badge);
         els.existingPhotosList.appendChild(card);
@@ -1223,6 +1224,10 @@
         img.src = photo.dataUrl;
         img.alt = photo.filename;
         img.className = "photo-thumb-img";
+        img.title = "اضغط لعرض الصورة بملء الشاشة";
+        img.addEventListener("click", () => {
+          openPhotoViewer(photo.dataUrl, photo.filename || "صورة الموقع");
+        });
 
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
@@ -1266,6 +1271,41 @@
       renderPhotoGallery();
       renderExistingAttachments();
     }
+
+    function openPhotoViewer(src, caption = "معاينة الصورة") {
+      if (!src || !els.photoViewerModal || !els.photoViewerImg) return;
+      els.photoViewerImg.src = src;
+      if (els.photoViewerCaption) {
+        els.photoViewerCaption.textContent = caption;
+      }
+      els.photoViewerModal.hidden = false;
+    }
+
+    function closePhotoViewer() {
+      if (!els.photoViewerModal) return;
+      els.photoViewerModal.hidden = true;
+      if (els.photoViewerImg) {
+        els.photoViewerImg.src = "";
+      }
+    }
+
+    if (els.btnClosePhotoViewer) {
+      els.btnClosePhotoViewer.addEventListener("click", closePhotoViewer);
+    }
+
+    if (els.photoViewerModal) {
+      els.photoViewerModal.addEventListener("click", (e) => {
+        if (e.target === els.photoViewerModal || e.target.classList.contains("photo-viewer-stage")) {
+          closePhotoViewer();
+        }
+      });
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && els.photoViewerModal && !els.photoViewerModal.hidden) {
+        closePhotoViewer();
+      }
+    });
 
     function buildJpgFilename(originalName, seq) {
       const base = (originalName || "field_photo").replace(/\.[^/.]+$/, "");

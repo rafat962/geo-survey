@@ -225,6 +225,19 @@
     </div>
   </section>
 
+  <!-- In-App Fullscreen Photo Viewer -->
+  <div id="photoViewerModal" class="photo-viewer-modal" role="dialog" aria-modal="true" aria-label="عرض الصورة" hidden>
+    <div class="photo-viewer-header">
+      <span id="photoViewerCaption" class="photo-viewer-caption">معاينة الصورة</span>
+      <button id="btnClosePhotoViewer" class="btn-close-viewer" type="button" aria-label="إغلاق المعاينة">
+        ✕
+      </button>
+    </div>
+    <div class="photo-viewer-stage">
+      <img id="photoViewerImg" class="photo-viewer-img" src="" alt="معاينة الصورة" />
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="https://js.arcgis.com/4.30/"></script>
   <script src="../js/config.js"></script>
