@@ -4,10 +4,10 @@
 
 // رابط طبقة النقاط (ArcGIS Hosted Feature Layer) - يجب أن ينتهي بـ /FeatureServer/0
 const POINTS_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_new_data/FeatureServer/0";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_18_11_2026/FeatureServer/19";
 // رابط طبقة المسار (اختياري) - في حال تركه فارغاً يتم رسم خط متقطع تلقائياً بين النقاط مرتبة تصاعدياً
 const ROUTE_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_new_data/FeatureServer/1";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_18_11_2026/FeatureServer/18";
 // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
   name: "Name", // اسم/كود النقطة في الطبقة (مثال: 1. UN-009)
