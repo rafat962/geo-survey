@@ -222,6 +222,7 @@
     let routeLayer = null;
     let activeOrderField = ACTIVE_FIELDS.order || "Sequence";
     let activeStatusField = ACTIVE_FIELDS.status || "status";
+    let activeNameField = ACTIVE_FIELDS.name || "Name";
     let resolvedPointsServiceUrl = ACTIVE_POINTS_URL;
     let resolvedRouteServiceUrl = ACTIVE_ROUTE_URL;
     let cachedFeatures = [];
@@ -368,10 +369,49 @@
       });
     }
 
+    function resolveNameFieldName(fields) {
+      if (!Array.isArray(fields) || fields.length === 0) return null;
+      const target = (ACTIVE_FIELDS.name || "Name").toLowerCase();
+      const match = fields.find((f) => f.name?.toLowerCase() === target);
+      return match ? match.name : null;
+    }
+
     function createNumberedLabeling(
       orderFieldName = activeOrderField,
-      statusFieldName = activeStatusField
+      statusFieldName = activeStatusField,
+      nameFieldName = activeNameField
     ) {
+      if (nameFieldName) {
+        const escapedField = nameFieldName.replace(/"/g, '\\"');
+        const cleanCodeArcade = [
+          `var raw = Trim(DefaultValue($feature["${escapedField}"], ''));`,
+          `var dotIdx = Find('.', raw);`,
+          `var sepIdx = IIf(dotIdx > 0 && dotIdx <= 4 && IsNan(Number(Left(raw, dotIdx))) == false, dotIdx, Find(' ', raw));`,
+          `IIf(sepIdx > 0 && sepIdx <= 4 && IsNan(Number(Left(raw, sepIdx))) == false, Trim(Mid(raw, sepIdx + 1)), raw)`
+        ].join("\n");
+
+        return [
+          new LabelClass({
+            labelPlacement: "above-center",
+            labelExpressionInfo: {
+              expression: cleanCodeArcade
+            },
+            symbol: {
+              type: "text",
+              color: "#ffffff",
+              haloColor: "rgba(15, 23, 42, 0.92)",
+              haloSize: "2px",
+              yoffset: 3,
+              font: {
+                family: "Arial, sans-serif",
+                size: "11px",
+                weight: "bold"
+              }
+            }
+          })
+        ];
+      }
+
       if (!orderFieldName) return [];
 
       const labelClassConfig = {
@@ -712,6 +752,7 @@
           objectIdField: oidField,
           activeOrderField,
           activeStatusField,
+          activeNameField,
           fields: safeFields,
           features: (features || []).map(serializeFeatureForCache)
         });
@@ -750,6 +791,11 @@
       if (cacheData.activeStatusField !== undefined) {
         activeStatusField = cacheData.activeStatusField;
       }
+      if (cacheData.activeNameField !== undefined) {
+        activeNameField = cacheData.activeNameField;
+      } else {
+        activeNameField = resolveNameFieldName(cacheData.fields);
+      }
 
       const sourceGraphics = (cacheData.features || [])
         .filter((item) => item.geometry)
@@ -780,7 +826,7 @@
         minScale: 0,
         maxScale: 0,
         renderer: createPointsRenderer(activeStatusField),
-        labelingInfo: createNumberedLabeling(activeOrderField, activeStatusField)
+        labelingInfo: createNumberedLabeling(activeOrderField, activeStatusField, activeNameField)
       });
     }
 
@@ -947,8 +993,13 @@
         );
         activeOrderField = resolveOrderFieldName(pointsLayer.fields);
         activeStatusField = resolveStatusFieldName(pointsLayer.fields);
+        activeNameField = resolveNameFieldName(pointsLayer.fields);
         pointsLayer.renderer = createPointsRenderer(activeStatusField);
-        pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField, activeStatusField);
+        pointsLayer.labelingInfo = createNumberedLabeling(
+          activeOrderField,
+          activeStatusField,
+          activeNameField
+        );
         if (activeStatusField) {
           pointsLayer.orderBy = [{ field: activeStatusField, order: "ascending" }];
         }
@@ -1045,7 +1096,11 @@
         ],
         popupEnabled: false,
         renderer: createPointsRenderer(),
-        labelingInfo: createNumberedLabeling(ACTIVE_FIELDS.order),
+        labelingInfo: createNumberedLabeling(
+          ACTIVE_FIELDS.order,
+          ACTIVE_FIELDS.status,
+          ACTIVE_FIELDS.name || "Name"
+        ),
         orderBy: [{ field: ACTIVE_FIELDS.status, order: "ascending" }]
       });
     }
