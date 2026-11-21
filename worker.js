@@ -353,6 +353,18 @@ export default {
       });
     }
 
+    if (pathname === "/sw.js") {
+      const assetRes = await env.ASSETS.fetch(request);
+      const headers = new Headers(assetRes.headers);
+      headers.set("Service-Worker-Allowed", "/");
+      headers.set("Cache-Control", "no-cache");
+      return new Response(assetRes.body, {
+        status: assetRes.status,
+        statusText: assetRes.statusText,
+        headers
+      });
+    }
+
     const isPublicAsset =
       pathname === "/" ||
       pathname === "/index.html" ||

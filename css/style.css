@@ -419,7 +419,7 @@ body {
   bottom: calc(90px + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%) translateY(20px);
-  z-index: 60;
+  z-index: 85;
   background: #0f172a;
   color: #ffffff;
   padding: 12px 18px;
@@ -1032,4 +1032,218 @@ textarea.form-control {
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+/* Offline Status & Outbox Sync Queue */
+.hud-status-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.offline-banner {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: rgba(180, 83, 9, 0.94);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: var(--shadow-lg);
+}
+
+.offline-banner[hidden] {
+  display: none;
+}
+
+.outbox-pill {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.outbox-pill.online-ready {
+  background: rgba(21, 128, 61, 0.95);
+  border-color: rgba(187, 247, 208, 0.4);
+}
+
+.outbox-pill:active {
+  transform: scale(0.98);
+}
+
+.outbox-pill[hidden] {
+  display: none;
+}
+
+.outbox-pill-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.outbox-action-hint {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.outbox-backdrop {
+  z-index: 65;
+}
+
+.outbox-sheet {
+  z-index: 70;
+}
+
+.outbox-top-actions {
+  padding: 12px 18px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.outbox-sync-status {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.outbox-sync-status[hidden] {
+  display: none;
+}
+
+.outbox-list {
+  padding: 12px 18px 20px;
+  gap: 10px;
+}
+
+.outbox-empty {
+  text-align: center;
+  padding: 28px 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.outbox-card {
+  border: 1.5px solid var(--border-color);
+  border-radius: 14px;
+  padding: 12px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.outbox-card.uploading {
+  border-color: var(--accent-blue);
+  background: #f8fafc;
+}
+
+.outbox-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.outbox-card-title {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.outbox-card-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.outbox-card-meta {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.outbox-card-error {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.outbox-card-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.btn-outbox-upload {
+  min-height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent-blue);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn-outbox-upload:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-outbox-delete {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-outbox-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

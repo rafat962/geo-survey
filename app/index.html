@@ -38,6 +38,19 @@
       </div>
     </div>
 
+    <div class="hud-status-strip">
+      <div id="offlineBanner" class="offline-banner" hidden>
+        📡 وضع بدون إنترنت — يتم الحفظ محلياً
+      </div>
+      <button id="outboxPillBtn" class="outbox-pill" type="button" hidden>
+        <span class="outbox-pill-label">
+          <span>📤</span>
+          <span id="outboxCountText">0 مهام بانتظار الرفع</span>
+        </span>
+        <span id="outboxActionHint" class="outbox-action-hint">عرض / رفع</span>
+      </button>
+    </div>
+
     <div id="demoBadge" class="demo-pill">
       وضع تجريبي — الصق رابط الطبقة في js/config.js للربط الفعلي
     </div>
@@ -225,6 +238,40 @@
     </div>
   </section>
 
+  <!-- Offline Outbox Sync Drawer -->
+  <div id="outboxBackdrop" class="sheet-backdrop outbox-backdrop"></div>
+  <section
+    id="outboxSheet"
+    class="bottom-sheet outbox-sheet"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="outboxSheetTitle"
+  >
+    <div class="sheet-handle-bar">
+      <div class="sheet-handle"></div>
+    </div>
+
+    <div class="sheet-header">
+      <div class="sheet-title-group">
+        <h2 id="outboxSheetTitle" class="sheet-title">المهام المعلقة للرفع</h2>
+        <span id="outboxNetBadge" class="status-badge pending">متصل</span>
+      </div>
+      <button id="btnCloseOutbox" class="btn-close-sheet" type="button" aria-label="إغلاق">
+        ✕
+      </button>
+    </div>
+
+    <div class="outbox-top-actions">
+      <button id="btnSyncAll" class="btn-primary" type="button">
+        <span id="syncAllSpinner" class="spinner"></span>
+        <span id="syncAllBtnText">☁️ رفع الكل مرة واحدة</span>
+      </button>
+      <div id="outboxSyncStatus" class="outbox-sync-status" hidden></div>
+    </div>
+
+    <div id="outboxList" class="sheet-body outbox-list"></div>
+  </section>
+
   <!-- In-App Fullscreen Photo Viewer -->
   <div id="photoViewerModal" class="photo-viewer-modal" role="dialog" aria-modal="true" aria-label="عرض الصورة" hidden>
     <div class="photo-viewer-header">
@@ -241,6 +288,7 @@
   <!-- Scripts -->
   <script src="https://js.arcgis.com/4.30/"></script>
   <script src="../js/config.js"></script>
+  <script src="../js/offline-db.js"></script>
   <script src="../js/app.js"></script>
 </body>
 </html>

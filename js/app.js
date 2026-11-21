@@ -156,7 +156,20 @@
       photoViewerModal: document.getElementById("photoViewerModal"),
       photoViewerImg: document.getElementById("photoViewerImg"),
       photoViewerCaption: document.getElementById("photoViewerCaption"),
-      btnClosePhotoViewer: document.getElementById("btnClosePhotoViewer")
+      btnClosePhotoViewer: document.getElementById("btnClosePhotoViewer"),
+      offlineBanner: document.getElementById("offlineBanner"),
+      outboxPillBtn: document.getElementById("outboxPillBtn"),
+      outboxCountText: document.getElementById("outboxCountText"),
+      outboxActionHint: document.getElementById("outboxActionHint"),
+      outboxBackdrop: document.getElementById("outboxBackdrop"),
+      outboxSheet: document.getElementById("outboxSheet"),
+      outboxNetBadge: document.getElementById("outboxNetBadge"),
+      btnCloseOutbox: document.getElementById("btnCloseOutbox"),
+      btnSyncAll: document.getElementById("btnSyncAll"),
+      syncAllSpinner: document.getElementById("syncAllSpinner"),
+      syncAllBtnText: document.getElementById("syncAllBtnText"),
+      outboxSyncStatus: document.getElementById("outboxSyncStatus"),
+      outboxList: document.getElementById("outboxList")
     };
 
     // --- State ---
@@ -164,13 +177,19 @@
     let routeLayer = null;
     let activeOrderField = FIELDS.order || "Sequence";
     let activeStatusField = FIELDS.status || "status";
+    let resolvedPointsServiceUrl = POINTS_LAYER_URL;
+    let resolvedRouteServiceUrl = ROUTE_LAYER_URL;
     let cachedFeatures = [];
     let activeFeature = null;
     let selectedPhotos = [];
     let existingAttachments = [];
     let pendingDeleteAttachmentIds = [];
+    let openedWithOutboxDraft = false;
     let photoIdCounter = 0;
     let isDemoMode = false;
+    let isOfflineCacheMode = false;
+    let cachedOutboxItems = [];
+    let isSyncingOutbox = false;
     let initialZoomDone = false;
     let toastTimer = null;
 
@@ -601,8 +620,197 @@
       }
     }
 
+    const OfflineDB = window.FieldOfflineDB || null;
+
+    function isLikelyNetworkError(err) {
+      if (!navigator.onLine) return true;
+      const msg = String(err?.message || err || "").toLowerCase();
+      if (
+        msg.includes("failed to fetch") ||
+        msg.includes("network") ||
+        msg.includes("load failed") ||
+        msg.includes("timeout") ||
+        msg.includes("offline") ||
+        msg.includes("abort")
+      ) {
+        return true;
+      }
+      if (err?.details?.httpStatus === 0 || err?.name === "TypeError") {
+        return true;
+      }
+      return false;
+    }
+
+    function serializeFeatureForCache(f) {
+      const coords = extractLatLng(f.geometry);
+      return {
+        attributes: { ...(f.attributes || {}) },
+        geometry: coords ? { longitude: coords.lng, latitude: coords.lat } : null
+      };
+    }
+
+    async function persistLayerCache(layer, features) {
+      if (!OfflineDB || isDemoMode || isOfflineCacheMode || !layer) return;
+      try {
+        const oidField = layer.objectIdField || "OBJECTID";
+        const safeFields = (layer.fields || [])
+          .filter((fld) => fld.type && fld.type !== "geometry")
+          .map((fld) => ({
+            name: fld.name,
+            alias: fld.alias || fld.name,
+            type: fld.type === "global-id" || fld.type === "guid" ? "string" : fld.type,
+            length: fld.length || undefined
+          }));
+
+        await OfflineDB.saveLayerCache("points_cache", {
+          serviceUrl: resolvedPointsServiceUrl || POINTS_LAYER_URL,
+          objectIdField: oidField,
+          activeOrderField,
+          activeStatusField,
+          fields: safeFields,
+          features: (features || []).map(serializeFeatureForCache)
+        });
+      } catch (err) {
+        console.warn("Could not persist offline points cache:", err);
+      }
+    }
+
+    async function persistRouteCache(layer) {
+      if (!OfflineDB || isDemoMode || isOfflineCacheMode || !layer || layer.type !== "feature") {
+        return;
+      }
+      try {
+        const res = await layer.queryFeatures({
+          where: "1=1",
+          outFields: [],
+          returnGeometry: true,
+          outSpatialReference: { wkid: 4326 }
+        });
+        const polylines = (res.features || [])
+          .filter((f) => f.geometry?.paths)
+          .map((f) => f.geometry.paths);
+
+        await OfflineDB.saveLayerCache("route_cache", {
+          serviceUrl: resolvedRouteServiceUrl || ROUTE_LAYER_URL,
+          pathsList: polylines
+        });
+      } catch (err) {
+        console.warn("Could not persist offline route cache:", err);
+      }
+    }
+
+    function createCachedOfflineFeatureLayer(cacheData) {
+      const oidField = cacheData.objectIdField || "OBJECTID";
+      if (cacheData.activeOrderField) activeOrderField = cacheData.activeOrderField;
+      if (cacheData.activeStatusField !== undefined) {
+        activeStatusField = cacheData.activeStatusField;
+      }
+
+      const sourceGraphics = (cacheData.features || [])
+        .filter((item) => item.geometry)
+        .map(
+          (item) =>
+            new Graphic({
+              geometry: new Point({
+                longitude: item.geometry.longitude,
+                latitude: item.geometry.latitude,
+                spatialReference: { wkid: 4326 }
+              }),
+              attributes: { ...(item.attributes || {}) }
+            })
+        );
+
+      let fields = Array.isArray(cacheData.fields) ? [...cacheData.fields] : [];
+      if (!fields.some((f) => f.name === oidField)) {
+        fields.unshift({ name: oidField, alias: oidField, type: "oid" });
+      }
+
+      return new FeatureLayer({
+        source: sourceGraphics,
+        objectIdField: oidField,
+        geometryType: "point",
+        spatialReference: { wkid: 4326 },
+        fields,
+        popupEnabled: false,
+        minScale: 0,
+        maxScale: 0,
+        renderer: createPointsRenderer(activeStatusField),
+        labelingInfo: createNumberedLabeling(activeOrderField, activeStatusField)
+      });
+    }
+
+    async function activateOfflineCacheFallback() {
+      if (!OfflineDB) return false;
+      const pointsCache = await OfflineDB.getLayerCache("points_cache").catch(() => null);
+      if (!pointsCache || !Array.isArray(pointsCache.features) || pointsCache.features.length === 0) {
+        return false;
+      }
+
+      isOfflineCacheMode = true;
+      if (pointsCache.serviceUrl) {
+        resolvedPointsServiceUrl = pointsCache.serviceUrl;
+      }
+
+      if (routeLayer) map.remove(routeLayer);
+      if (pointsLayer) map.remove(pointsLayer);
+
+      const routeCache = await OfflineDB.getLayerCache("route_cache").catch(() => null);
+      if (routeCache && Array.isArray(routeCache.pathsList) && routeCache.pathsList.length > 0) {
+        const offlineRouteLayer = new GraphicsLayer({
+          id: "offline-route-cache",
+          opacity: 0.85
+        });
+        const lineSymbol = getRouteLineSymbol();
+        routeCache.pathsList.forEach((paths) => {
+          offlineRouteLayer.add(
+            new Graphic({
+              geometry: new Polyline({ paths, spatialReference: { wkid: 4326 } }),
+              symbol: lineSymbol
+            })
+          );
+        });
+        routeLayer = offlineRouteLayer;
+      } else {
+        routeLayer = null;
+      }
+
+      pointsLayer = createCachedOfflineFeatureLayer(pointsCache);
+      map.addMany([routeLayer, pointsLayer].filter(Boolean));
+      await pointsLayer.load();
+      await loadAndSyncPoints(true);
+
+      showToast(
+        `📡 وضع بدون إنترنت: تم تحميل ${pointsCache.features.length} نقطة من الذاكرة المحلية`,
+        "info",
+        5000
+      );
+      return true;
+    }
+
+    let liveUpgradePromise = null;
+    async function upgradeOfflineLayerToLive() {
+      if (!isOfflineCacheMode && pointsLayer && pointsLayer.type === "feature" && pointsLayer.url) {
+        return;
+      }
+      if (liveUpgradePromise) return liveUpgradePromise;
+
+      liveUpgradePromise = (async () => {
+        if (routeLayer) map.remove(routeLayer);
+        if (pointsLayer) map.remove(pointsLayer);
+        isOfflineCacheMode = false;
+        await initializeLayers(false);
+      })();
+
+      try {
+        await liveUpgradePromise;
+      } finally {
+        liveUpgradePromise = null;
+      }
+    }
+
     async function initializeLayers(useDemo) {
       isDemoMode = useDemo;
+      isOfflineCacheMode = false;
       els.demoBadge.classList.toggle("visible", useDemo);
 
       let tokenError = null;
@@ -611,9 +819,6 @@
         const tokenRes = await registerEsriTokenFromServer();
         accessToken = tokenRes.token;
         tokenError = tokenRes.error;
-        if (tokenError) {
-          showToast(`تعذر توليد توكن ArcGIS: ${tokenError}`, "error", 6500);
-        }
       }
 
       const [resolvedRouteUrl, resolvedPointsUrl] = useDemo
@@ -623,6 +828,8 @@
             resolveFeatureLayerUrl(POINTS_LAYER_URL, accessToken, "esriGeometryPoint")
           ]);
 
+      resolvedPointsServiceUrl = resolvedPointsUrl || POINTS_LAYER_URL;
+      resolvedRouteServiceUrl = resolvedRouteUrl || ROUTE_LAYER_URL;
       console.info("Resolved layer URLs:", { resolvedPointsUrl, resolvedRouteUrl });
 
       if (resolvedRouteUrl && resolvedRouteUrl.trim() !== "") {
@@ -678,42 +885,40 @@
             console.info("Route feature count:", routeCount);
             if (routeCount === 0) {
               showToast("طبقة المسار محملة لكنها فارغة (0 خطوط)", "error", 6000);
+            } else {
+              persistRouteCache(routeLayer);
             }
           })
           .catch((err) => {
-            console.error("Failed to load route layer:", err);
-            showToast(
-              `تعذر تحميل طبقة المسار: ${err?.message || "تحقق من الرابط أو الصلاحيات"}`,
-              "error",
-              6500
-            );
+            console.warn("Failed to load route layer:", err);
           });
       }
 
-      pointsLayer
-        .load()
-        .then(() => {
-          console.info(
-            "Points layer fields:",
-            (pointsLayer.fields || []).map((f) => f.name)
-          );
-          activeOrderField = resolveOrderFieldName(pointsLayer.fields);
-          activeStatusField = resolveStatusFieldName(pointsLayer.fields);
-          pointsLayer.renderer = createPointsRenderer(activeStatusField);
-          pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField, activeStatusField);
-          if (activeStatusField) {
-            pointsLayer.orderBy = [{ field: activeStatusField, order: "ascending" }];
-          }
-          return loadAndSyncPoints(true);
-        })
-        .catch((err) => {
-          console.error("Failed to load points layer:", err);
+      try {
+        await pointsLayer.load();
+        console.info(
+          "Points layer fields:",
+          (pointsLayer.fields || []).map((f) => f.name)
+        );
+        activeOrderField = resolveOrderFieldName(pointsLayer.fields);
+        activeStatusField = resolveStatusFieldName(pointsLayer.fields);
+        pointsLayer.renderer = createPointsRenderer(activeStatusField);
+        pointsLayer.labelingInfo = createNumberedLabeling(activeOrderField, activeStatusField);
+        if (activeStatusField) {
+          pointsLayer.orderBy = [{ field: activeStatusField, order: "ascending" }];
+        }
+        await loadAndSyncPoints(true);
+      } catch (err) {
+        console.error("Failed to load points layer:", err);
+        const restoredOffline = !useDemo ? await activateOfflineCacheFallback() : false;
+        if (!restoredOffline) {
           const reason = tokenError
             ? `مشكلة توكن ArcGIS: ${tokenError}`
             : err?.message || "تأكد من رابط الطبقة وصلاحيات الوصول";
           els.progressText.textContent = "تعذر تحميل طبقة النقاط";
           showToast(`فشل تحميل طبقة النقاط: ${reason}`, "error", 7000);
-        });
+        }
+      }
     }
 
     function createDemoFeatureLayer() {
@@ -796,7 +1001,24 @@
       });
     }
 
-    // --- Query, Route Generation, Progress & Next Point ---
+    // --- Query, Route Generation, Progress & Offline Cache Sync ---
+    async function applyOutboxOverlayToFeatures(features) {
+      if (!OfflineDB || !Array.isArray(features) || features.length === 0) return;
+      const outbox = await OfflineDB.getAllOutbox().catch(() => []);
+      if (outbox.length === 0) return;
+
+      const oidField = pointsLayer?.objectIdField || "OBJECTID";
+      const outboxByOid = new Map(outbox.map((item) => [String(item.objectId), item]));
+
+      features.forEach((f) => {
+        const oid = f.attributes?.[oidField];
+        const queued = oid !== undefined ? outboxByOid.get(String(oid)) : null;
+        if (queued?.attributes) {
+          Object.assign(f.attributes, queued.attributes);
+        }
+      });
+    }
+
     async function loadAndSyncPoints(shouldZoomAll = false) {
       if (!pointsLayer) return;
 
@@ -807,9 +1029,17 @@
       query.outSpatialReference = view.spatialReference;
 
       const featureSet = await pointsLayer.queryFeatures(query);
-      cachedFeatures = sortFeaturesByOrder(featureSet.features || []);
+      const rawFeatures = featureSet.features || [];
+
+      if (!isDemoMode && !isOfflineCacheMode && rawFeatures.length > 0) {
+        persistLayerCache(pointsLayer, rawFeatures);
+      }
+
+      await applyOutboxOverlayToFeatures(rawFeatures);
+      cachedFeatures = sortFeaturesByOrder(rawFeatures);
 
       updateProgressUI(cachedFeatures);
+      await refreshOutboxUI();
 
       if (!ROUTE_LAYER_URL || ROUTE_LAYER_URL.trim() === "") {
         drawAutoRoute(cachedFeatures);
@@ -954,7 +1184,10 @@
 
     els.fieldCommitteeDecision.addEventListener("change", syncNotesRequirement);
 
-    function openBottomSheet(graphic) {
+    let bottomSheetOpenSeq = 0;
+
+    async function openBottomSheet(graphic) {
+      const openSeq = ++bottomSheetOpenSeq;
       const oidField = pointsLayer.objectIdField || "OBJECTID";
       const oid = graphic.attributes?.[oidField];
       const fullGraphic =
@@ -964,7 +1197,21 @@
       resetPhotoState();
       hideFormError();
 
-      const attrs = fullGraphic.attributes || {};
+      let outboxItem = null;
+      if (!isDemoMode && OfflineDB && oid !== undefined && oid !== null) {
+        const outboxId = OfflineDB.makeOutboxId(
+          resolvedPointsServiceUrl || POINTS_LAYER_URL,
+          oid
+        );
+        outboxItem = await OfflineDB.getOutboxItem(outboxId).catch(() => null);
+        if (openSeq !== bottomSheetOpenSeq || !activeFeature) return;
+      }
+
+      openedWithOutboxDraft = Boolean(outboxItem);
+      const baseAttrs = fullGraphic.attributes || {};
+      const attrs = outboxItem?.attributes
+        ? { ...baseAttrs, ...outboxItem.attributes }
+        : baseAttrs;
       const orderVal = getStopOrderValue(attrs) ?? "--";
       const pointCode = getCleanPointCode(attrs);
       const completed = isCompletedStatus(getStopStatusValue(attrs));
@@ -972,8 +1219,14 @@
       els.sheetTitle.textContent = pointCode
         ? `محطة #${orderVal} (${pointCode})`
         : `محطة رقم #${orderVal}`;
-      els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
-      els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
+
+      if (outboxItem) {
+        els.sheetStatusBadge.textContent = "بانتظار الرفع (أوفلاين)";
+        els.sheetStatusBadge.className = "status-badge pending";
+      } else {
+        els.sheetStatusBadge.textContent = completed ? "مكتملة" : "قيد الانتظار";
+        els.sheetStatusBadge.className = `status-badge ${completed ? "completed" : "pending"}`;
+      }
       els.submitBtnText.textContent = completed ? "حفظ التعديلات" : "حفظ وإتمام النقطة";
 
       if (els.btnSheetGoogleMaps) {
@@ -984,6 +1237,26 @@
         } else {
           els.btnSheetGoogleMaps.href = "#";
           els.btnSheetGoogleMaps.hidden = true;
+        }
+      }
+
+      if (outboxItem) {
+        pendingDeleteAttachmentIds = Array.isArray(outboxItem.deleteAttachmentIds)
+          ? [...outboxItem.deleteAttachmentIds]
+          : [];
+        if (Array.isArray(outboxItem.photos) && outboxItem.photos.length > 0) {
+          selectedPhotos = outboxItem.photos.map((p) => {
+            const blob = new Blob([p.buffer], { type: p.type || "image/jpeg" });
+            return {
+              id: ++photoIdCounter,
+              blob,
+              dataUrl: URL.createObjectURL(blob),
+              filename: p.filename || `field_photo_${photoIdCounter}.jpg`,
+              size: p.size || blob.size,
+              isObjectUrl: true
+            };
+          });
+          renderPhotoGallery();
         }
       }
 
@@ -1143,11 +1416,12 @@
 
     async function loadExistingAttachments(objectId) {
       existingAttachments = [];
-      pendingDeleteAttachmentIds = [];
       renderExistingAttachments();
 
       if (
         isDemoMode ||
+        isOfflineCacheMode ||
+        !navigator.onLine ||
         !objectId ||
         pointsLayer?.capabilities?.data?.supportsAttachment === false
       ) {
@@ -1286,6 +1560,7 @@
       selectedPhotos = [];
       existingAttachments = [];
       pendingDeleteAttachmentIds = [];
+      openedWithOutboxDraft = false;
       els.photoInput.value = "";
       renderPhotoGallery();
       renderExistingAttachments();
@@ -1857,7 +2132,458 @@
       return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
     }
 
-    // --- Form Submission (applyEdits + Sequential Multi-Attachment Upload) ---
+    // --- Offline Outbox Persistence & Sync Engine (Upload All / One-by-One) ---
+    function getOutboxItemIdForOid(oid) {
+      if (!OfflineDB) return `oid_${oid}`;
+      return OfflineDB.makeOutboxId(resolvedPointsServiceUrl || POINTS_LAYER_URL, oid);
+    }
+
+    async function saveSubmissionToOutbox(feature, attributesPayload, options = {}) {
+      if (!OfflineDB) {
+        throw new Error("المتصفح لا يدعم التخزين المحلي IndexedDB.");
+      }
+      const oidField = pointsLayer?.objectIdField || "OBJECTID";
+      const oid = feature.attributes?.[oidField];
+      const attrs = feature.attributes || {};
+      const orderVal = getStopOrderValue(attrs) ?? "--";
+      const pointCode = getCleanPointCode(attrs);
+      const district = getCleanAttrText(
+        attrs,
+        (typeof FIELDS !== "undefined" && FIELDS.district) || "district"
+      );
+      const streetName = getCleanAttrText(
+        attrs,
+        (typeof FIELDS !== "undefined" && FIELDS.streetName) || "street_name"
+      );
+
+      const savedRecord = await OfflineDB.saveOrMergeOutboxItem({
+        id: getOutboxItemIdForOid(oid),
+        objectId: oid,
+        layerUrl: resolvedPointsServiceUrl || POINTS_LAYER_URL,
+        orderVal,
+        pointCode,
+        district,
+        streetName,
+        attributes: attributesPayload,
+        photos: [...selectedPhotos],
+        deleteAttachmentIds: [...pendingDeleteAttachmentIds],
+        replacePhotos: Boolean(options.replacePhotos),
+        replaceDeletes: Boolean(options.replaceDeletes),
+        skipAttributeEdit: Boolean(options.skipAttributeEdit)
+      });
+
+      // Mirror status immediately onto local cached features & offline layer
+      Object.assign(feature.attributes, attributesPayload);
+      const targetFeature = cachedFeatures.find(
+        (f) => f.attributes?.[oidField] === oid
+      );
+      if (targetFeature && targetFeature !== feature) {
+        Object.assign(targetFeature.attributes, attributesPayload);
+      }
+      if (isOfflineCacheMode && pointsLayer && !pointsLayer.url) {
+        const localClone = feature.clone();
+        Object.assign(localClone.attributes, attributesPayload);
+        await pointsLayer.applyEdits({ updateFeatures: [localClone] }).catch(() => {});
+      }
+
+      updateProgressUI(cachedFeatures);
+      await refreshOutboxUI();
+      return savedRecord;
+    }
+
+    function updateOnlineStatusUI() {
+      const online = navigator.onLine;
+      if (els.offlineBanner) {
+        els.offlineBanner.hidden = online;
+      }
+      if (els.outboxNetBadge) {
+        els.outboxNetBadge.textContent = online ? "متصل بالإنترنت" : "غير متصل";
+        els.outboxNetBadge.className = `status-badge ${online ? "completed" : "pending"}`;
+      }
+      if (els.outboxPillBtn) {
+        els.outboxPillBtn.classList.toggle("online-ready", online && cachedOutboxItems.length > 0);
+      }
+      if (els.outboxActionHint) {
+        els.outboxActionHint.textContent = online ? "اضغط للرفع" : "بانتظار الشبكة";
+      }
+      if (els.btnSyncAll && !isSyncingOutbox) {
+        els.btnSyncAll.disabled = !online || cachedOutboxItems.length === 0;
+      }
+    }
+
+    async function refreshOutboxUI() {
+      if (!OfflineDB || isDemoMode) {
+        cachedOutboxItems = [];
+        if (els.outboxPillBtn) els.outboxPillBtn.hidden = true;
+        updateOnlineStatusUI();
+        return;
+      }
+
+      cachedOutboxItems = await OfflineDB.getAllOutbox().catch(() => []);
+      const count = cachedOutboxItems.length;
+
+      if (els.outboxPillBtn && els.outboxCountText) {
+        els.outboxPillBtn.hidden = count === 0;
+        els.outboxCountText.textContent =
+          count === 1
+            ? "مهمة واحدة بانتظار الرفع"
+            : count === 2
+              ? "مهمتان بانتظار الرفع"
+              : `${count} مهام بانتظار الرفع`;
+      }
+
+      updateOnlineStatusUI();
+      if (els.outboxSheet?.classList.contains("open")) {
+        renderOutboxList();
+      }
+    }
+
+    function setSyncStatusBanner(text, visible = true) {
+      if (!els.outboxSyncStatus) return;
+      els.outboxSyncStatus.textContent = text || "";
+      els.outboxSyncStatus.hidden = !visible || !text;
+    }
+
+    function renderOutboxList() {
+      if (!els.outboxList) return;
+      els.outboxList.innerHTML = "";
+
+      if (cachedOutboxItems.length === 0) {
+        const emptyDiv = document.createElement("div");
+        emptyDiv.className = "outbox-empty";
+        emptyDiv.textContent = "تمت مزامنة جميع النقاط والصور بنجاح ✓";
+        els.outboxList.appendChild(emptyDiv);
+        if (els.btnSyncAll) els.btnSyncAll.disabled = true;
+        return;
+      }
+
+      if (els.btnSyncAll && !isSyncingOutbox) {
+        els.btnSyncAll.disabled = !navigator.onLine;
+      }
+
+      const decisionField = resolveLayerFieldName(
+        FIELDS.committeeDecision || "committee_decision"
+      );
+
+      cachedOutboxItems.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = `outbox-card${item.status === "uploading" ? " uploading" : ""}`;
+
+        const head = document.createElement("div");
+        head.className = "outbox-card-head";
+
+        const title = document.createElement("div");
+        title.className = "outbox-card-title";
+        title.textContent = item.pointCode
+          ? `محطة #${item.orderVal} (${item.pointCode})`
+          : `محطة رقم #${item.orderVal}`;
+
+        const timeEl = document.createElement("div");
+        timeEl.className = "outbox-card-time";
+        timeEl.textContent = item.updatedAt
+          ? formatWatermarkTimestamp(new Date(item.updatedAt))
+          : "";
+
+        head.appendChild(title);
+        head.appendChild(timeEl);
+        card.appendChild(head);
+
+        const meta = document.createElement("div");
+        meta.className = "outbox-card-meta";
+        const decisionText =
+          item.attributes?.[decisionField] ||
+          item.attributes?.committee_decision ||
+          "تحديث بيانات";
+        const photoCount = Array.isArray(item.photos) ? item.photos.length : 0;
+        const delCount = Array.isArray(item.deleteAttachmentIds)
+          ? item.deleteAttachmentIds.length
+          : 0;
+        const parts = [decisionText];
+        if (photoCount > 0) parts.push(`📷 ${photoCount} صورة`);
+        if (delCount > 0) parts.push(`🗑️ حذف ${delCount}`);
+        if (item.district) parts.push(item.district);
+        meta.textContent = parts.join(" · ");
+        card.appendChild(meta);
+
+        if (item.lastError) {
+          const errBox = document.createElement("div");
+          errBox.className = "outbox-card-error";
+          errBox.textContent = item.lastError;
+          card.appendChild(errBox);
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "outbox-card-actions";
+
+        const uploadBtn = document.createElement("button");
+        uploadBtn.type = "button";
+        uploadBtn.className = "btn-outbox-upload";
+        uploadBtn.disabled = isSyncingOutbox || !navigator.onLine;
+        uploadBtn.textContent =
+          item.status === "uploading" ? "جاري الرفع..." : "☁️ رفع الآن";
+        uploadBtn.addEventListener("click", () => {
+          uploadSingleOutboxItem(item.id);
+        });
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "btn-outbox-delete";
+        deleteBtn.disabled = isSyncingOutbox;
+        deleteBtn.textContent = "حذف";
+        deleteBtn.addEventListener("click", () => {
+          removeOutboxDraft(item.id, title.textContent);
+        });
+
+        actions.appendChild(uploadBtn);
+        actions.appendChild(deleteBtn);
+        card.appendChild(actions);
+        els.outboxList.appendChild(card);
+      });
+    }
+
+    function openOutboxSheet() {
+      refreshOutboxUI().then(() => {
+        renderOutboxList();
+        els.outboxBackdrop?.classList.add("open");
+        els.outboxSheet?.classList.add("open");
+      });
+    }
+
+    function closeOutboxSheet() {
+      if (isSyncingOutbox) return;
+      els.outboxBackdrop?.classList.remove("open");
+      els.outboxSheet?.classList.remove("open");
+      setSyncStatusBanner("", false);
+    }
+
+    async function ensureLiveSyncReady() {
+      if (!navigator.onLine) {
+        throw new Error("لا يوجد اتصال بالإنترنت حالياً.");
+      }
+
+      const tokenRes = await registerEsriTokenFromServer();
+      if (!tokenRes.token && tokenRes.error) {
+        throw new Error(`تعذر تجديد توكن ArcGIS: ${tokenRes.error}`);
+      }
+
+      if (isOfflineCacheMode || !pointsLayer || !pointsLayer.url) {
+        await upgradeOfflineLayerToLive();
+      }
+
+      if (!pointsLayer || !pointsLayer.loaded) {
+        await pointsLayer.load();
+      }
+    }
+
+    async function syncOutboxRecord(record, prefixLabel = "") {
+      if (!OfflineDB || !record) return;
+
+      const oidField = pointsLayer.objectIdField || "OBJECTID";
+      const workingRecord = { ...record, photos: [...(record.photos || [])], status: "uploading", lastError: "" };
+      await OfflineDB.putOutboxItem(workingRecord);
+      await refreshOutboxUI();
+
+      try {
+        // Resolve the real graphic from live layer or build lightweight Graphic with OID
+        let baseGraphic = cachedFeatures.find(
+          (f) => String(f.attributes?.[oidField]) === String(workingRecord.objectId)
+        );
+        if (!baseGraphic) {
+          baseGraphic = new Graphic({
+            attributes: { [oidField]: workingRecord.objectId }
+          });
+        }
+
+        const updatedGraphic = baseGraphic.clone();
+        updatedGraphic.attributes[oidField] = workingRecord.objectId;
+
+        Object.entries(workingRecord.attributes || {}).forEach(([k, v]) => {
+          const resolvedKey = resolveLayerFieldName(k);
+          updatedGraphic.attributes[resolvedKey] = v;
+        });
+
+        if (!workingRecord.skipAttributeEdit) {
+          setSyncStatusBanner(`${prefixLabel}جاري رفع البيانات النصية...`, true);
+          const editRes = await pointsLayer.applyEdits({
+            updateFeatures: [updatedGraphic]
+          });
+          const featureRes = editRes?.updateFeatureResults?.[0];
+          if (featureRes?.error) {
+            throw new Error(featureRes.error.message || "فشل تحديث بيانات النقطة.");
+          }
+          workingRecord.skipAttributeEdit = true;
+          await OfflineDB.putOutboxItem(workingRecord);
+        }
+
+        if (
+          Array.isArray(workingRecord.deleteAttachmentIds) &&
+          workingRecord.deleteAttachmentIds.length > 0
+        ) {
+          setSyncStatusBanner(`${prefixLabel}جاري حذف الصور المحددة...`, true);
+          const delRes = await pointsLayer.deleteAttachments(
+            updatedGraphic,
+            workingRecord.deleteAttachmentIds
+          );
+          if (delRes?.error) {
+            throw new Error(delRes.error.message || "فشل حذف إحدى الصور.");
+          }
+          if (Array.isArray(delRes?.deleteAttachmentResults)) {
+            const failedDel = delRes.deleteAttachmentResults.find(
+              (r) => r?.error || r?.success === false
+            );
+            if (failedDel) {
+              throw new Error(failedDel.error?.message || "فشل حذف إحدى الصور.");
+            }
+          }
+          workingRecord.deleteAttachmentIds = [];
+          await OfflineDB.putOutboxItem(workingRecord);
+        }
+
+        const totalPhotos = workingRecord.photos.length;
+        for (let i = 0; i < totalPhotos; i++) {
+          const p = workingRecord.photos[0];
+          setSyncStatusBanner(
+            `${prefixLabel}جاري رفع صورة ${i + 1} من ${totalPhotos}...`,
+            true
+          );
+
+          const blob = new Blob([p.buffer], { type: p.type || "image/jpeg" });
+          const formData = new FormData();
+          formData.append("attachment", blob, p.filename || `field_photo_${i + 1}.jpg`);
+
+          const attachRes = await pointsLayer.addAttachment(updatedGraphic, formData);
+          if (attachRes?.error) {
+            throw new Error(attachRes.error.message || `فشل رفع صورة ${i + 1}.`);
+          }
+
+          // Remove uploaded photo immediately so partial uploads never duplicate
+          workingRecord.photos.shift();
+          await OfflineDB.putOutboxItem(workingRecord);
+        }
+
+        await OfflineDB.deleteOutboxItem(workingRecord.id);
+      } catch (err) {
+        workingRecord.status = "error";
+        workingRecord.lastError = err?.message || "تعذر الرفع للخادم.";
+        await OfflineDB.putOutboxItem(workingRecord);
+        throw err;
+      }
+    }
+
+    function setOutboxSyncingState(syncing) {
+      isSyncingOutbox = syncing;
+      if (els.btnSyncAll) {
+        els.btnSyncAll.disabled = syncing || !navigator.onLine || cachedOutboxItems.length === 0;
+      }
+      if (els.syncAllSpinner) {
+        els.syncAllSpinner.classList.toggle("visible", syncing);
+      }
+      if (els.syncAllBtnText) {
+        els.syncAllBtnText.textContent = syncing
+          ? "جاري المزامنة..."
+          : "☁️ رفع الكل مرة واحدة";
+      }
+      if (els.btnCloseOutbox) {
+        els.btnCloseOutbox.disabled = syncing;
+      }
+      renderOutboxList();
+    }
+
+    async function uploadSingleOutboxItem(itemId) {
+      if (isSyncingOutbox || !OfflineDB) return;
+      const item = await OfflineDB.getOutboxItem(itemId).catch(() => null);
+      if (!item) return;
+
+      setOutboxSyncingState(true);
+      try {
+        setSyncStatusBanner("جاري تجهيز الاتصال وتجديد التوكن...", true);
+        await ensureLiveSyncReady();
+        const label = item.pointCode ? `${item.pointCode}: ` : `#${item.orderVal}: `;
+        await syncOutboxRecord(item, label);
+
+        pointsLayer.refresh();
+        await loadAndSyncPoints(false);
+        setSyncStatusBanner("تم رفع النقطة بنجاح ✓", true);
+        showToast("تم رفع النقطة بنجاح", "success");
+      } catch (err) {
+        console.error("Single outbox upload error:", err);
+        setSyncStatusBanner(err?.message || "تعذر رفع النقطة.", true);
+        showToast(err?.message || "تعذر رفع النقطة حالياً.", "error", 4500);
+      } finally {
+        setOutboxSyncingState(false);
+        await refreshOutboxUI();
+      }
+    }
+
+    async function uploadAllOutboxItems() {
+      if (isSyncingOutbox || !OfflineDB) return;
+      const queue = await OfflineDB.getAllOutbox().catch(() => []);
+      if (queue.length === 0) return;
+
+      setOutboxSyncingState(true);
+      let uploadedCount = 0;
+
+      try {
+        setSyncStatusBanner("جاري تجهيز الاتصال وتجديد التوكن...", true);
+        await ensureLiveSyncReady();
+
+        for (let i = 0; i < queue.length; i++) {
+          const item = queue[i];
+          const prefix = `(${i + 1} من ${queue.length}) `;
+          await syncOutboxRecord(item, prefix);
+          uploadedCount++;
+        }
+
+        pointsLayer.refresh();
+        await loadAndSyncPoints(false);
+        setSyncStatusBanner(`تم رفع ${uploadedCount} مهام بنجاح ✓`, true);
+        showToast(`تم رفع جميع المهام (${uploadedCount}) بنجاح`, "success", 4000);
+      } catch (err) {
+        console.error("Batch outbox sync error:", err);
+        if (uploadedCount > 0 && pointsLayer) {
+          pointsLayer.refresh();
+          await loadAndSyncPoints(false).catch(() => {});
+        }
+        setSyncStatusBanner(
+          `توقف الرفع بعد ${uploadedCount} من ${queue.length}: ${err?.message || "خطأ بالاتصال"}`,
+          true
+        );
+        showToast(
+          `تم رفع ${uploadedCount} وتبقت مهام لم تُرفع بسبب الشبكة.`,
+          "error",
+          5000
+        );
+      } finally {
+        setOutboxSyncingState(false);
+        await refreshOutboxUI();
+      }
+    }
+
+    async function removeOutboxDraft(itemId, label) {
+      if (isSyncingOutbox || !OfflineDB) return;
+      if (!window.confirm(`هل تريد حذف المسودة المحلية (${label}) نهائياً؟`)) {
+        return;
+      }
+      await OfflineDB.deleteOutboxItem(itemId);
+      await loadAndSyncPoints(false).catch(() => {});
+      await refreshOutboxUI();
+      showToast("تم حذف المسودة المحلية", "info");
+    }
+
+    if (els.outboxPillBtn) {
+      els.outboxPillBtn.addEventListener("click", openOutboxSheet);
+    }
+    if (els.btnCloseOutbox) {
+      els.btnCloseOutbox.addEventListener("click", closeOutboxSheet);
+    }
+    if (els.outboxBackdrop) {
+      els.outboxBackdrop.addEventListener("click", closeOutboxSheet);
+    }
+    if (els.btnSyncAll) {
+      els.btnSyncAll.addEventListener("click", uploadAllOutboxItems);
+    }
+
+    // --- Form Submission (applyEdits + Sequential Multi-Attachment Upload + Offline Outbox Fallback) ---
     els.pointForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!activeFeature || !pointsLayer) return;
@@ -1891,28 +2617,63 @@
       );
       setSubmittingState(true, "جاري حفظ البيانات...");
 
+      const oidField = pointsLayer.objectIdField || "OBJECTID";
+      const oid = activeFeature.attributes[oidField];
+      const dateField = resolveLayerFieldName(
+        FIELDS.actualHandoverDate || "actual_handover_date"
+      );
+      const decisionField = resolveLayerFieldName(
+        FIELDS.committeeDecision || "committee_decision"
+      );
+      const hasBaseField = resolveLayerFieldName(FIELDS.hasBase || "has_base");
+      const notesField = resolveLayerFieldName(
+        FIELDS.notesObstacles || "notes_obstacles"
+      );
+      const statusField = activeStatusField || FIELDS.status || "status";
+
+      const attributesPayload = {
+        [dateField]: Date.now(),
+        [decisionField]: committeeDecision,
+        [hasBaseField]: hasBase,
+        [notesField]: notesObstacles,
+        [statusField]: STATUS_VALUES.completed
+      };
+
+      // If completely offline (or running from cached layer), queue straight to IndexedDB Outbox
+      if (!isDemoMode && (isOfflineCacheMode || !navigator.onLine)) {
+        try {
+          await saveSubmissionToOutbox(activeFeature, attributesPayload, {
+            replacePhotos: openedWithOutboxDraft,
+            replaceDeletes: openedWithOutboxDraft,
+            skipAttributeEdit: false
+          });
+          const savedPhotosCount = selectedPhotos.length;
+          closeBottomSheet();
+          showToast(
+            savedPhotosCount > 0
+              ? `📡 تم الحفظ محلياً بدون نت (${savedPhotosCount} صور) وسيُرفع لاحقاً`
+              : "📡 تم حفظ التعديلات محلياً بدون نت وستُرفع لاحقاً",
+            "info",
+            4500
+          );
+        } catch (offlineErr) {
+          console.error("Offline save error:", offlineErr);
+          showFormError(offlineErr?.message || "تعذر حفظ البيانات محلياً على الجهاز.");
+        } finally {
+          setSubmittingState(
+            false,
+            wasAlreadyCompleted ? "حفظ التعديلات" : "حفظ وإتمام النقطة"
+          );
+        }
+        return;
+      }
+
+      let attributesSavedOnServer = false;
+
       try {
-        const oidField = pointsLayer.objectIdField || "OBJECTID";
         const updatedGraphic = activeFeature.clone();
-
-        const dateField = resolveLayerFieldName(
-          FIELDS.actualHandoverDate || "actual_handover_date"
-        );
-        const decisionField = resolveLayerFieldName(
-          FIELDS.committeeDecision || "committee_decision"
-        );
-        const hasBaseField = resolveLayerFieldName(FIELDS.hasBase || "has_base");
-        const notesField = resolveLayerFieldName(
-          FIELDS.notesObstacles || "notes_obstacles"
-        );
-
-        const statusField = activeStatusField || FIELDS.status || "status";
-        updatedGraphic.attributes[oidField] = activeFeature.attributes[oidField];
-        updatedGraphic.attributes[dateField] = Date.now();
-        updatedGraphic.attributes[decisionField] = committeeDecision;
-        updatedGraphic.attributes[hasBaseField] = hasBase;
-        updatedGraphic.attributes[notesField] = notesObstacles;
-        updatedGraphic.attributes[statusField] = STATUS_VALUES.completed;
+        updatedGraphic.attributes[oidField] = oid;
+        Object.assign(updatedGraphic.attributes, attributesPayload);
 
         const editResult = await pointsLayer.applyEdits({
           updateFeatures: [updatedGraphic]
@@ -1924,6 +2685,7 @@
             featureUpdateRes.error.message || "فشل تحديث بيانات النقطة في الخادم."
           );
         }
+        attributesSavedOnServer = true;
 
         // Delete any existing attachments marked for removal
         if (!isDemoMode && pendingDeleteAttachmentIds.length > 0) {
@@ -1980,6 +2742,10 @@
           removeQueuedPhoto(photo.id);
         }
 
+        if (!isDemoMode && OfflineDB) {
+          await OfflineDB.deleteOutboxItem(getOutboxItemIdForOid(oid)).catch(() => {});
+        }
+
         if (!isDemoMode) {
           pointsLayer.refresh();
         }
@@ -1992,6 +2758,30 @@
         );
       } catch (err) {
         console.error("Submission error:", err);
+
+        // Automatic fallback to IndexedDB Outbox if network dropped before or during upload
+        if (!isDemoMode && isLikelyNetworkError(err)) {
+          try {
+            await saveSubmissionToOutbox(activeFeature, attributesPayload, {
+              replacePhotos: openedWithOutboxDraft || attributesSavedOnServer,
+              replaceDeletes: openedWithOutboxDraft || attributesSavedOnServer,
+              skipAttributeEdit: attributesSavedOnServer
+            });
+            const remCount = selectedPhotos.length;
+            closeBottomSheet();
+            showToast(
+              remCount > 0
+                ? `📶 انقطع الاتصال — تم حفظ المتبقي (${remCount} صور) للرفع عند عودة النت`
+                : "📶 انقطع الاتصال — تم حفظ النقطة محلياً للرفع عند عودة النت",
+              "info",
+              5000
+            );
+            return;
+          } catch (fallbackErr) {
+            console.error("Fallback offline save error:", fallbackErr);
+          }
+        }
+
         showFormError(
           err?.message
             ? `تعذر الحفظ: ${err.message}`
@@ -2030,8 +2820,40 @@
       }, durationMs);
     }
 
+    // --- Network State Listeners & Service Worker Registration ---
+    window.addEventListener("online", async () => {
+      updateOnlineStatusUI();
+      await refreshOutboxUI();
+
+      if (cachedOutboxItems.length > 0) {
+        showToast(
+          `🌐 عاد الاتصال بالإنترنت — لديك ${cachedOutboxItems.length} مهام جاهزة للرفع`,
+          "success",
+          5000
+        );
+      } else {
+        showToast("🌐 عاد الاتصال بالإنترنت", "info", 2500);
+      }
+
+      if (isOfflineCacheMode && POINTS_LAYER_URL && POINTS_LAYER_URL.trim() !== "") {
+        upgradeOfflineLayerToLive().catch(() => {});
+      }
+    });
+
+    window.addEventListener("offline", () => {
+      updateOnlineStatusUI();
+      showToast("📡 انقطع الاتصال بالإنترنت — سيستمر الحفظ محلياً", "info", 3500);
+    });
+
+    if (!IS_LOCAL_FILE && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => {
+        console.warn("Service worker registration skipped:", err);
+      });
+    }
+
     // --- Startup Check ---
     loadWatermarkLogos().catch(() => {});
+    refreshOutboxUI().catch(() => {});
     if (POINTS_LAYER_URL && POINTS_LAYER_URL.trim() !== "") {
       initializeLayers(false);
     } else {
