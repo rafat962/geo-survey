@@ -723,6 +723,8 @@
       const samplePoints = [
         {
           name: "1. UN-009",
+          district: "الرصيفة",
+          streetName: "طريق الملك عبدالعزيز",
           order: 1,
           status: STATUS_VALUES.completed,
           date: nowMs - 86400000,
@@ -732,6 +734,8 @@
         },
         {
           name: "2. MG-095",
+          district: "الشوقية",
+          streetName: "شارع عبدالله عريف",
           order: 2,
           status: STATUS_VALUES.completed,
           date: nowMs - 86400000,
@@ -739,10 +743,10 @@
           hasBase: "نعم",
           notes: "يحتاج تسوية بسيطة بالرصيف"
         },
-        { name: "3. UN-080", order: 3, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { name: "4. UN-040", order: 4, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { name: "5. MG-092", order: 5, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
-        { name: "6. MG-116", order: 6, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" }
+        { name: "3. UN-080", district: "العزيزية", streetName: "شارع المسجد الحرام", order: 3, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "4. UN-040", district: "العزيزية", streetName: "شارع الشيخ عبدالله خياط", order: 4, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "5. MG-092", district: "العوالي", streetName: "طريق إبراهيم الجفالي", order: 5, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" },
+        { name: "6. MG-116", district: "بطحاء قريش", streetName: "شارع جبل ثور", order: 6, status: STATUS_VALUES.pending, date: null, decision: "", hasBase: "", notes: "" }
       ];
 
       const sourceGraphics = samplePoints.map((pt, idx) => {
@@ -756,6 +760,8 @@
           attributes: {
             OBJECTID: idx + 1,
             [FIELDS.name || "Name"]: pt.name,
+            [FIELDS.district || "district"]: pt.district || "",
+            [FIELDS.streetName || "street_name"]: pt.streetName || "",
             [FIELDS.order]: pt.order,
             [FIELDS.status]: pt.status,
             [FIELDS.actualHandoverDate]: pt.date,
@@ -774,6 +780,8 @@
         fields: [
           { name: "OBJECTID", alias: "OBJECTID", type: "oid" },
           { name: FIELDS.name || "Name", alias: "Name", type: "string", length: 100, editable: false },
+          { name: FIELDS.district || "district", alias: "الحي", type: "string", length: 150, editable: false },
+          { name: FIELDS.streetName || "street_name", alias: "اسم الشارع", type: "string", length: 200, editable: false },
           { name: FIELDS.order, alias: "رقم المحطة", type: "integer", editable: false },
           { name: FIELDS.status, alias: "الحالة", type: "string", editable: true },
           { name: FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
@@ -1574,22 +1582,21 @@
       ctx.restore();
     }
 
-    function getCleanPointCode(attrs) {
-      if (!attrs) return "";
-      const targetName = (typeof FIELDS !== "undefined" && FIELDS.name) || "Name";
-      let raw = attrs[targetName];
-      if (raw === undefined || raw === null || raw === "") {
-        const ciKey = Object.keys(attrs).find(
-          (k) => k.toLowerCase() === targetName.toLowerCase()
-        );
-        raw = ciKey ? attrs[ciKey] : "";
-      }
+    function getCleanAttrText(attrs, preferredField) {
+      if (!attrs || !preferredField) return "";
+      const raw = readAttrCaseInsensitive(attrs, preferredField);
       if (raw === undefined || raw === null) return "";
+      const trimmed = String(raw).trim();
+      if (!trimmed || /^(null|undefined|<null>)$/i.test(trimmed)) return "";
+      return trimmed;
+    }
+
+    function getCleanPointCode(attrs) {
+      const targetName = (typeof FIELDS !== "undefined" && FIELDS.name) || "Name";
+      const raw = getCleanAttrText(attrs, targetName);
+      if (!raw) return "";
       // Strip leading index + dot/whitespace (e.g. "1. UN-009", "35. MO-056" -> "UN-009", "MO-056")
-      return String(raw)
-        .trim()
-        .replace(/^\d+(?:\s*\.\s*|\s+)/, "")
-        .trim();
+      return raw.replace(/^\d+(?:\s*\.\s*|\s+)/, "").trim();
     }
 
     async function buildWatermarkInfo() {
@@ -1603,6 +1610,14 @@
         typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.includePointOrder;
       const orderNum = getStopOrderValue(activeFeature?.attributes);
       const pointCode = getCleanPointCode(activeFeature?.attributes);
+      const district = getCleanAttrText(
+        activeFeature?.attributes,
+        (typeof FIELDS !== "undefined" && FIELDS.district) || "district"
+      );
+      const streetName = getCleanAttrText(
+        activeFeature?.attributes,
+        (typeof FIELDS !== "undefined" && FIELDS.streetName) || "street_name"
+      );
 
       const lines = [timestamp];
       if (coordsLine) {
@@ -1619,6 +1634,23 @@
         );
       } else if (includeOrder && orderNum !== undefined && orderNum !== null) {
         lines.push(`Stop #${orderNum}`);
+      }
+
+      if (district) {
+        const cleanDistrict = district.replace(/^حي\s+/i, "").trim();
+        lines.push(
+          /[\u0600-\u06FF]/.test(cleanDistrict)
+            ? `الحي: ${cleanDistrict}`
+            : `District: ${cleanDistrict}`
+        );
+      }
+
+      if (streetName) {
+        lines.push(
+          /[\u0600-\u06FF]/.test(streetName)
+            ? `الشارع: ${streetName}`
+            : `Street: ${streetName}`
+        );
       }
 
       const minimapCanvas = location
@@ -1691,12 +1723,14 @@
       ctx.fillStyle = topGrad;
       ctx.fillRect(0, 0, width, topShadeHeight);
 
-      // Draw Top-Left White Text Lines
+      // Draw Top-Left White Text Lines (supporting RTL Arabic lines alongside LTR lines)
       ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
       ctx.shadowBlur = 4;
       ctx.shadowOffsetY = 1;
       ctx.fillStyle = "#ffffff";
       lines.forEach((line, idx) => {
+        ctx.direction = /[\u0600-\u06FF]/.test(line) ? "rtl" : "ltr";
+        ctx.textAlign = "left";
         ctx.fillText(line, padX, padY + idx * lineHeight);
       });
       ctx.restore();

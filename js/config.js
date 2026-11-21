@@ -9,6 +9,8 @@ const ROUTE_LAYER_URL =
   "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_21_11_2026/FeatureServer"; // ربط أسماء الحقول الفعلية في طبقة النقاط
 const FIELDS = {
   name: "Name", // اسم/كود النقطة في الطبقة (مثال: 1. UN-009)
+  district: "district", // اسم الحي للختم على الصورة
+  streetName: "street_name", // اسم الشارع للختم على الصورة
   order: "Sequence", // حقل رقم الترتيب الأساسي (ArcGIS Plan Routes)
   orderFallback: "order_num", // حقل الترتيب البديل في حال عدم وجود Sequence
   status: "status", // حقل الحالة ("Pending" / "Completed")
