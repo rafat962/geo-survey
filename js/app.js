@@ -1674,15 +1674,15 @@
       const minimapCanvas = !Array.isArray(watermarkData) ? watermarkData.minimapCanvas : null;
       const location = !Array.isArray(watermarkData) ? watermarkData.location : null;
 
-      // 1. Measure Top-Right White Logos Box
+      // 1. Measure Top-Right White Logos Box (compact to keep photo prominent)
       let logoBoxW = 0;
       let logoBoxH = 0;
       let logoPad = 0;
       let logoInnerW = 0;
       let logoInnerH = 0;
       if (logosImg && logosImg.naturalWidth > 0 && logosImg.naturalHeight > 0) {
-        logoBoxW = Math.round(Math.min(width * 0.38, Math.max(210, width * 0.35)));
-        logoPad = Math.max(4, Math.round(logoBoxW * 0.025));
+        logoBoxW = Math.round(Math.min(width * 0.28, Math.max(165, width * 0.27)));
+        logoPad = Math.max(3, Math.round(logoBoxW * 0.018));
         logoInnerW = logoBoxW - logoPad * 2;
         logoInnerH = Math.round(
           logoInnerW * (logosImg.naturalHeight / logosImg.naturalWidth)
@@ -1690,12 +1690,12 @@
         logoBoxH = logoInnerH + logoPad * 2;
       }
 
-      // 2. Measure Top-Left Text (Date/Time + Coordinates + Code)
-      const padX = Math.max(12, Math.round(width * 0.018));
-      const padY = Math.max(10, Math.round(width * 0.015));
+      // 2. Measure Top-Left Text (compact Date/Time + Coordinates + Code + District + Street)
+      const padX = Math.max(10, Math.round(width * 0.014));
+      const padY = Math.max(8, Math.round(width * 0.012));
       const maxTextW = Math.max(120, (logoBoxW > 0 ? width - logoBoxW : width) - padX * 2);
 
-      let fontSize = Math.max(15, Math.round(width * 0.029));
+      let fontSize = Math.max(12, Math.round(width * 0.021));
       ctx.save();
       ctx.direction = "ltr";
       ctx.textAlign = "left";
@@ -1704,28 +1704,29 @@
       if (lines.length > 0) {
         ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
         let widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
-        while (widest > maxTextW && fontSize > 12) {
+        while (widest > maxTextW && fontSize > 11) {
           fontSize -= 1;
           ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
           widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
         }
       }
 
-      const lineHeight = Math.round(fontSize * 1.28);
+      const lineHeight = Math.round(fontSize * 1.22);
       const textBlockHeight = lines.length * lineHeight;
-      const topShadeHeight = Math.max(logoBoxH, padY * 2 + textBlockHeight) + 22;
+      const topShadeHeight = padY * 2 + textBlockHeight + 12;
 
-      // Subtle dark top gradient behind timestamp/coords so text stays legible on bright backgrounds
+      // Subtle light top fade behind left text only so the rest of the photo stays bright and clear
+      const shadeW = logoBoxW > 0 ? width - logoBoxW + 16 : width;
       const topGrad = ctx.createLinearGradient(0, 0, 0, topShadeHeight);
-      topGrad.addColorStop(0, "rgba(0, 0, 0, 0.72)");
-      topGrad.addColorStop(0.65, "rgba(0, 0, 0, 0.35)");
+      topGrad.addColorStop(0, "rgba(0, 0, 0, 0.56)");
+      topGrad.addColorStop(0.65, "rgba(0, 0, 0, 0.24)");
       topGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx.fillStyle = topGrad;
-      ctx.fillRect(0, 0, width, topShadeHeight);
+      ctx.fillRect(0, 0, shadeW, topShadeHeight);
 
       // Draw Top-Left White Text Lines (supporting RTL Arabic lines alongside LTR lines)
       ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
-      ctx.shadowBlur = 4;
+      ctx.shadowBlur = 3;
       ctx.shadowOffsetY = 1;
       ctx.fillStyle = "#ffffff";
       lines.forEach((line, idx) => {
@@ -1745,10 +1746,10 @@
         ctx.restore();
       }
 
-      // 4. Draw Bottom-Left Satellite Minimap with Red Pin
+      // 4. Draw Bottom-Left Compact Satellite Minimap with Red Pin
       if (location) {
-        const mapW = Math.round(width * 0.32);
-        const mapH = Math.min(Math.round(mapW * 1.05), Math.round(height * 0.31));
+        const mapW = Math.round(width * 0.21);
+        const mapH = Math.min(Math.round(mapW * 0.94), Math.round(height * 0.21));
         const mapX = 0;
         const mapY = height - mapH;
 
