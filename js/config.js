@@ -2,11 +2,11 @@
  * CONFIGURATION SECTION (قم بتعديل الروابط وأسماء الحقول هنا)
  * ========================================================================= */
 
-// رابط طبقة النقاط (ArcGIS Hosted Feature Layer) - يدعم /FeatureServer أو /FeatureServer/0
-const POINTS_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_21_11_2026/FeatureServer"; // رابط طبقة المسار (اختياري) - في حال تركه فارغاً أو عدم وجود طبقة خطوط داخل الخدمة تُعرض النقاط فقط
-const ROUTE_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_21_11_2026/FeatureServer"; // ربط أسماء الحقول الفعلية في طبقة النقاط
+// --- 1. إعدادات موديل تسليم المواقع (/app/) — فارغ حالياً بدون بيانات ---
+const POINTS_LAYER_URL = "";
+const ROUTE_LAYER_URL = "";
+
+// ربط أسماء الحقول الفعلية في طبقة التسليم
 const FIELDS = {
   name: "Name", // اسم/كود النقطة في الطبقة (مثال: 1. UN-009)
   district: "district", // اسم الحي للختم على الصورة
@@ -18,6 +18,32 @@ const FIELDS = {
   committeeDecision: "committee_decision", // قرار لجنة التسليم (String >= 100 حرف)
   hasBase: "has_base", // يوجد قاعدة بالموقع (String)
   notesObstacles: "notes_obstacles", // الملاحظات / المعوقات (String)
+};
+
+// --- 2. إعدادات موديل التنفيذ الميداني (/exec/) ---
+const EXEC_CONFIG = {
+  pointsLayerUrl:
+    "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_21_11_2026/FeatureServer",
+  routeLayerUrl:
+    "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/makkah_21_11_2026/FeatureServer",
+  fields: {
+    name: "Name",
+    district: "district",
+    streetName: "street_name",
+    order: "Sequence",
+    orderFallback: "order_num",
+    status: "status",
+    actualHandoverDate: "actual_handover_date",
+    stage: "stage",
+    notes: "notes"
+  },
+  stages: [
+    "حفر واستلام حفر",
+    "تسليح",
+    "صب",
+    "عزل",
+    "اعاده الوضع لاصله"
+  ]
 };
 
 // قيم الحالة المخزنة في قاعدة البيانات

@@ -5,6 +5,9 @@
 (function () {
   const IS_LOCAL_FILE = location.protocol === "file:";
   const LOCAL_AUTH_KEY = "fieldAppLocalAuth";
+  const LOGIN_REDIRECT_URL = /\/exec(?:\/|$)/i.test(location.pathname)
+    ? "/?next=/exec/"
+    : "/";
 
   if (IS_LOCAL_FILE) {
     try {
@@ -42,7 +45,7 @@
         } catch (err) {
           console.warn("Logout request failed:", err);
         }
-        window.location.replace("/");
+        window.location.replace(LOGIN_REDIRECT_URL);
       });
     }
 
@@ -60,7 +63,7 @@
     try {
       const res = await fetch("/api/session", { cache: "no-store" });
       if (res.status === 401 || res.status === 404) {
-        window.location.replace("/");
+        window.location.replace(LOGIN_REDIRECT_URL);
         return;
       }
       if (res.ok) {
@@ -69,7 +72,7 @@
           userBadge.textContent = data.user;
           userBadge.hidden = false;
         } else if (!data?.authenticated) {
-          window.location.replace("/");
+          window.location.replace(LOGIN_REDIRECT_URL);
         }
       }
     } catch (err) {
@@ -139,6 +142,8 @@
       fieldHasBase: document.getElementById("fieldHasBase"),
       fieldNotesObstacles: document.getElementById("fieldNotesObstacles"),
       notesRequiredBadge: document.getElementById("notesRequiredBadge"),
+      fieldExecStage: document.getElementById("fieldExecStage"),
+      fieldExecNotes: document.getElementById("fieldExecNotes"),
       existingPhotosSection: document.getElementById("existingPhotosSection"),
       existingPhotosCountLabel: document.getElementById("existingPhotosCountLabel"),
       existingPhotosList: document.getElementById("existingPhotosList"),
@@ -172,13 +177,53 @@
       outboxList: document.getElementById("outboxList")
     };
 
+    // --- Mode Configuration (Handover /app/ vs Execution /exec/) ---
+    const APP_MODE =
+      window.APP_MODE ||
+      document.body?.dataset?.appMode ||
+      (/\/exec(?:\/|$)/i.test(location.pathname) ? "exec" : "handover");
+    const IS_EXEC_MODE = APP_MODE === "exec";
+
+    const ACTIVE_POINTS_URL = IS_EXEC_MODE
+      ? (typeof EXEC_CONFIG !== "undefined" && EXEC_CONFIG.pointsLayerUrl) || ""
+      : POINTS_LAYER_URL;
+    const ACTIVE_ROUTE_URL = IS_EXEC_MODE
+      ? (typeof EXEC_CONFIG !== "undefined" && EXEC_CONFIG.routeLayerUrl) || ""
+      : ROUTE_LAYER_URL;
+    const ACTIVE_FIELDS = IS_EXEC_MODE
+      ? {
+          ...FIELDS,
+          ...((typeof EXEC_CONFIG !== "undefined" && EXEC_CONFIG.fields) || {})
+        }
+      : FIELDS;
+    const POINTS_CACHE_KEY = IS_EXEC_MODE ? "exec_points_cache" : "handover_points_cache";
+    const ROUTE_CACHE_KEY = IS_EXEC_MODE ? "exec_route_cache" : "handover_route_cache";
+
+    // Sync Execution stage options dynamically from EXEC_CONFIG.stages
+    if (
+      IS_EXEC_MODE &&
+      els.fieldExecStage &&
+      typeof EXEC_CONFIG !== "undefined" &&
+      Array.isArray(EXEC_CONFIG.stages) &&
+      EXEC_CONFIG.stages.length > 0
+    ) {
+      els.fieldExecStage.innerHTML =
+        '<option value="" disabled selected>-- اختر المرحلة --</option>';
+      EXEC_CONFIG.stages.forEach((stageName) => {
+        const opt = document.createElement("option");
+        opt.value = stageName;
+        opt.textContent = stageName;
+        els.fieldExecStage.appendChild(opt);
+      });
+    }
+
     // --- State ---
     let pointsLayer = null;
     let routeLayer = null;
-    let activeOrderField = FIELDS.order || "Sequence";
-    let activeStatusField = FIELDS.status || "status";
-    let resolvedPointsServiceUrl = POINTS_LAYER_URL;
-    let resolvedRouteServiceUrl = ROUTE_LAYER_URL;
+    let activeOrderField = ACTIVE_FIELDS.order || "Sequence";
+    let activeStatusField = ACTIVE_FIELDS.status || "status";
+    let resolvedPointsServiceUrl = ACTIVE_POINTS_URL;
+    let resolvedRouteServiceUrl = ACTIVE_ROUTE_URL;
     let cachedFeatures = [];
     let activeFeature = null;
     let selectedPhotos = [];
@@ -378,7 +423,7 @@
       try {
         const res = await fetch("/api/esri-token", { cache: "no-store" });
         if (res.status === 401) {
-          window.location.replace("/");
+          window.location.replace(LOGIN_REDIRECT_URL);
           return { token: null, error: "انتهت الجلسة، يرجى إعادة تسجيل الدخول" };
         }
         const data = await res.json().catch(() => ({}));
@@ -399,8 +444,8 @@
 
         const serverRoots = new Set([
           `${portalBase}/sharing/rest`,
-          ...getServiceServers(POINTS_LAYER_URL),
-          ...getServiceServers(ROUTE_LAYER_URL)
+          ...getServiceServers(ACTIVE_POINTS_URL),
+          ...getServiceServers(ACTIVE_ROUTE_URL)
         ]);
 
         serverRoots.forEach((server) => {
@@ -429,11 +474,11 @@
     // --- Layer Initialization ---
     function resolveOrderFieldName(fields) {
       if (!Array.isArray(fields) || fields.length === 0) {
-        return FIELDS.order || "Sequence";
+        return ACTIVE_FIELDS.order || "Sequence";
       }
       const candidates = [
-        FIELDS.order || "Sequence",
-        FIELDS.orderFallback || "order_num",
+        ACTIVE_FIELDS.order || "Sequence",
+        ACTIVE_FIELDS.orderFallback || "order_num",
         "Sequence",
         "order_num",
         "StopOrder",
@@ -453,19 +498,19 @@
       }
 
       const oidField = fields.find((f) => f.type === "oid");
-      return oidField ? oidField.name : FIELDS.order || "Sequence";
+      return oidField ? oidField.name : ACTIVE_FIELDS.order || "Sequence";
     }
 
     function resolveStatusFieldName(fields) {
       if (!Array.isArray(fields) || fields.length === 0) return null;
-      const target = (FIELDS.status || "status").toLowerCase();
+      const target = (ACTIVE_FIELDS.status || "status").toLowerCase();
       const match = fields.find((f) => f.name?.toLowerCase() === target);
       return match ? match.name : null;
     }
 
     function getStopStatusValue(attrs) {
       if (!attrs) return null;
-      const candidates = [activeStatusField, FIELDS.status, "status"].filter(Boolean);
+      const candidates = [activeStatusField, ACTIVE_FIELDS.status, "status"].filter(Boolean);
       for (const name of candidates) {
         if (attrs[name] !== undefined) return attrs[name];
         const ciKey = Object.keys(attrs).find(
@@ -480,8 +525,8 @@
       if (!attrs) return null;
       const candidates = [
         activeOrderField,
-        FIELDS.order,
-        FIELDS.orderFallback,
+        ACTIVE_FIELDS.order,
+        ACTIVE_FIELDS.orderFallback,
         "Sequence",
         "order_num",
         "OBJECTID"
@@ -662,8 +707,8 @@
             length: fld.length || undefined
           }));
 
-        await OfflineDB.saveLayerCache("points_cache", {
-          serviceUrl: resolvedPointsServiceUrl || POINTS_LAYER_URL,
+        await OfflineDB.saveLayerCache(POINTS_CACHE_KEY, {
+          serviceUrl: resolvedPointsServiceUrl || ACTIVE_POINTS_URL,
           objectIdField: oidField,
           activeOrderField,
           activeStatusField,
@@ -690,8 +735,8 @@
           .filter((f) => f.geometry?.paths)
           .map((f) => f.geometry.paths);
 
-        await OfflineDB.saveLayerCache("route_cache", {
-          serviceUrl: resolvedRouteServiceUrl || ROUTE_LAYER_URL,
+        await OfflineDB.saveLayerCache(ROUTE_CACHE_KEY, {
+          serviceUrl: resolvedRouteServiceUrl || ACTIVE_ROUTE_URL,
           pathsList: polylines
         });
       } catch (err) {
@@ -741,7 +786,7 @@
 
     async function activateOfflineCacheFallback() {
       if (!OfflineDB) return false;
-      const pointsCache = await OfflineDB.getLayerCache("points_cache").catch(() => null);
+      const pointsCache = await OfflineDB.getLayerCache(POINTS_CACHE_KEY).catch(() => null);
       if (!pointsCache || !Array.isArray(pointsCache.features) || pointsCache.features.length === 0) {
         return false;
       }
@@ -754,7 +799,7 @@
       if (routeLayer) map.remove(routeLayer);
       if (pointsLayer) map.remove(pointsLayer);
 
-      const routeCache = await OfflineDB.getLayerCache("route_cache").catch(() => null);
+      const routeCache = await OfflineDB.getLayerCache(ROUTE_CACHE_KEY).catch(() => null);
       if (routeCache && Array.isArray(routeCache.pathsList) && routeCache.pathsList.length > 0) {
         const offlineRouteLayer = new GraphicsLayer({
           id: "offline-route-cache",
@@ -822,14 +867,14 @@
       }
 
       const [resolvedRouteUrl, resolvedPointsUrl] = useDemo
-        ? [ROUTE_LAYER_URL, POINTS_LAYER_URL]
+        ? [ACTIVE_ROUTE_URL, ACTIVE_POINTS_URL]
         : await Promise.all([
-            resolveFeatureLayerUrl(ROUTE_LAYER_URL, accessToken, "esriGeometryPolyline"),
-            resolveFeatureLayerUrl(POINTS_LAYER_URL, accessToken, "esriGeometryPoint")
+            resolveFeatureLayerUrl(ACTIVE_ROUTE_URL, accessToken, "esriGeometryPolyline"),
+            resolveFeatureLayerUrl(ACTIVE_POINTS_URL, accessToken, "esriGeometryPoint")
           ]);
 
-      resolvedPointsServiceUrl = resolvedPointsUrl || POINTS_LAYER_URL;
-      resolvedRouteServiceUrl = resolvedRouteUrl || ROUTE_LAYER_URL;
+      resolvedPointsServiceUrl = resolvedPointsUrl || ACTIVE_POINTS_URL;
+      resolvedRouteServiceUrl = resolvedRouteUrl || ACTIVE_ROUTE_URL;
       console.info("Resolved layer URLs:", { resolvedPointsUrl, resolvedRouteUrl });
 
       if (resolvedRouteUrl && resolvedRouteUrl.trim() !== "") {
@@ -844,7 +889,7 @@
             symbol: getRouteLineSymbol()
           })
         });
-      } else if (!ROUTE_LAYER_URL || ROUTE_LAYER_URL.trim() === "") {
+      } else if (!ACTIVE_ROUTE_URL || ACTIVE_ROUTE_URL.trim() === "") {
         routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.8 });
       } else {
         routeLayer = null;
@@ -964,15 +1009,17 @@
           }),
           attributes: {
             OBJECTID: idx + 1,
-            [FIELDS.name || "Name"]: pt.name,
-            [FIELDS.district || "district"]: pt.district || "",
-            [FIELDS.streetName || "street_name"]: pt.streetName || "",
-            [FIELDS.order]: pt.order,
-            [FIELDS.status]: pt.status,
-            [FIELDS.actualHandoverDate]: pt.date,
-            [FIELDS.committeeDecision]: pt.decision,
-            [FIELDS.hasBase]: pt.hasBase,
-            [FIELDS.notesObstacles]: pt.notes
+            [ACTIVE_FIELDS.name || "Name"]: pt.name,
+            [ACTIVE_FIELDS.district || "district"]: pt.district || "",
+            [ACTIVE_FIELDS.streetName || "street_name"]: pt.streetName || "",
+            [ACTIVE_FIELDS.order]: pt.order,
+            [ACTIVE_FIELDS.status]: pt.status,
+            [ACTIVE_FIELDS.actualHandoverDate]: pt.date,
+            [ACTIVE_FIELDS.committeeDecision]: pt.decision,
+            [ACTIVE_FIELDS.hasBase]: pt.hasBase,
+            [ACTIVE_FIELDS.notesObstacles]: pt.notes,
+            [ACTIVE_FIELDS.stage || "stage"]: pt.order === 1 ? "حفر واستلام حفر" : "",
+            [ACTIVE_FIELDS.notes || "notes"]: pt.notes
           }
         });
       });
@@ -984,27 +1031,35 @@
         spatialReference: { wkid: 4326 },
         fields: [
           { name: "OBJECTID", alias: "OBJECTID", type: "oid" },
-          { name: FIELDS.name || "Name", alias: "Name", type: "string", length: 100, editable: false },
-          { name: FIELDS.district || "district", alias: "الحي", type: "string", length: 150, editable: false },
-          { name: FIELDS.streetName || "street_name", alias: "اسم الشارع", type: "string", length: 200, editable: false },
-          { name: FIELDS.order, alias: "رقم المحطة", type: "integer", editable: false },
-          { name: FIELDS.status, alias: "الحالة", type: "string", editable: true },
-          { name: FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
-          { name: FIELDS.committeeDecision, alias: "قرار لجنة التسليم", type: "string", length: 150, editable: true },
-          { name: FIELDS.hasBase, alias: "يوجد قاعدة بالموقع", type: "string", length: 20, editable: true },
-          { name: FIELDS.notesObstacles, alias: "الملاحظات / المعوقات", type: "string", length: 500, editable: true }
+          { name: ACTIVE_FIELDS.name || "Name", alias: "Name", type: "string", length: 100, editable: false },
+          { name: ACTIVE_FIELDS.district || "district", alias: "الحي", type: "string", length: 150, editable: false },
+          { name: ACTIVE_FIELDS.streetName || "street_name", alias: "اسم الشارع", type: "string", length: 200, editable: false },
+          { name: ACTIVE_FIELDS.order, alias: "رقم المحطة", type: "integer", editable: false },
+          { name: ACTIVE_FIELDS.status, alias: "الحالة", type: "string", editable: true },
+          { name: ACTIVE_FIELDS.actualHandoverDate, alias: "تاريخ الاستلام الفعلي", type: "date", editable: true },
+          { name: ACTIVE_FIELDS.committeeDecision, alias: "قرار لجنة التسليم", type: "string", length: 150, editable: true },
+          { name: ACTIVE_FIELDS.hasBase, alias: "يوجد قاعدة بالموقع", type: "string", length: 20, editable: true },
+          { name: ACTIVE_FIELDS.notesObstacles, alias: "الملاحظات / المعوقات", type: "string", length: 500, editable: true },
+          { name: ACTIVE_FIELDS.stage || "stage", alias: "المرحلة", type: "string", length: 100, editable: true },
+          { name: ACTIVE_FIELDS.notes || "notes", alias: "الملاحظات", type: "string", length: 500, editable: true }
         ],
         popupEnabled: false,
         renderer: createPointsRenderer(),
-        labelingInfo: createNumberedLabeling(FIELDS.order),
-        orderBy: [{ field: FIELDS.status, order: "ascending" }]
+        labelingInfo: createNumberedLabeling(ACTIVE_FIELDS.order),
+        orderBy: [{ field: ACTIVE_FIELDS.status, order: "ascending" }]
       });
     }
 
     // --- Query, Route Generation, Progress & Offline Cache Sync ---
+    async function getModeOutboxItems() {
+      if (!OfflineDB || isDemoMode) return [];
+      const all = await OfflineDB.getAllOutbox().catch(() => []);
+      return all.filter((item) => (item.mode || "handover") === APP_MODE);
+    }
+
     async function applyOutboxOverlayToFeatures(features) {
       if (!OfflineDB || !Array.isArray(features) || features.length === 0) return;
-      const outbox = await OfflineDB.getAllOutbox().catch(() => []);
+      const outbox = await getModeOutboxItems();
       if (outbox.length === 0) return;
 
       const oidField = pointsLayer?.objectIdField || "OBJECTID";
@@ -1041,7 +1096,7 @@
       updateProgressUI(cachedFeatures);
       await refreshOutboxUI();
 
-      if (!ROUTE_LAYER_URL || ROUTE_LAYER_URL.trim() === "") {
+      if (!ACTIVE_ROUTE_URL || ACTIVE_ROUTE_URL.trim() === "") {
         drawAutoRoute(cachedFeatures);
       }
 
@@ -1176,13 +1231,18 @@
     ]);
 
     function syncNotesRequirement() {
+      if (IS_EXEC_MODE || !els.fieldCommitteeDecision || !els.fieldNotesObstacles) return;
       const decision = els.fieldCommitteeDecision.value;
       const needsNotes = DECISIONS_REQUIRING_NOTES.has(decision);
       els.fieldNotesObstacles.required = needsNotes;
-      els.notesRequiredBadge.hidden = !needsNotes;
+      if (els.notesRequiredBadge) {
+        els.notesRequiredBadge.hidden = !needsNotes;
+      }
     }
 
-    els.fieldCommitteeDecision.addEventListener("change", syncNotesRequirement);
+    if (els.fieldCommitteeDecision) {
+      els.fieldCommitteeDecision.addEventListener("change", syncNotesRequirement);
+    }
 
     let bottomSheetOpenSeq = 0;
 
@@ -1200,7 +1260,7 @@
       let outboxItem = null;
       if (!isDemoMode && OfflineDB && oid !== undefined && oid !== null) {
         const outboxId = OfflineDB.makeOutboxId(
-          resolvedPointsServiceUrl || POINTS_LAYER_URL,
+          resolvedPointsServiceUrl || ACTIVE_POINTS_URL,
           oid
         );
         outboxItem = await OfflineDB.getOutboxItem(outboxId).catch(() => null);
@@ -1311,17 +1371,37 @@
     }
 
     function populateFixedFormFields(attrs) {
-      const decisionField = FIELDS.committeeDecision || "committee_decision";
-      const hasBaseField = FIELDS.hasBase || "has_base";
-      const notesField = FIELDS.notesObstacles || "notes_obstacles";
+      if (IS_EXEC_MODE) {
+        const stageField = ACTIVE_FIELDS.stage || "stage";
+        const notesField = ACTIVE_FIELDS.notes || "notes";
+
+        const savedStage = readAttrCaseInsensitive(attrs, stageField);
+        if (els.fieldExecStage) {
+          els.fieldExecStage.value = savedStage ? String(savedStage) : "";
+        }
+        if (els.fieldExecNotes) {
+          els.fieldExecNotes.value = readAttrCaseInsensitive(attrs, notesField) ?? "";
+        }
+        return;
+      }
+
+      const decisionField = ACTIVE_FIELDS.committeeDecision || "committee_decision";
+      const hasBaseField = ACTIVE_FIELDS.hasBase || "has_base";
+      const notesField = ACTIVE_FIELDS.notesObstacles || "notes_obstacles";
 
       const savedDecision = readAttrCaseInsensitive(attrs, decisionField);
-      els.fieldCommitteeDecision.value = savedDecision ? String(savedDecision) : "";
+      if (els.fieldCommitteeDecision) {
+        els.fieldCommitteeDecision.value = savedDecision ? String(savedDecision) : "";
+      }
 
       const savedHasBase = readAttrCaseInsensitive(attrs, hasBaseField);
-      els.fieldHasBase.value = savedHasBase ? String(savedHasBase) : "";
+      if (els.fieldHasBase) {
+        els.fieldHasBase.value = savedHasBase ? String(savedHasBase) : "";
+      }
 
-      els.fieldNotesObstacles.value = readAttrCaseInsensitive(attrs, notesField) ?? "";
+      if (els.fieldNotesObstacles) {
+        els.fieldNotesObstacles.value = readAttrCaseInsensitive(attrs, notesField) ?? "";
+      }
       syncNotesRequirement();
     }
 
@@ -1867,7 +1947,7 @@
     }
 
     function getCleanPointCode(attrs) {
-      const targetName = (typeof FIELDS !== "undefined" && FIELDS.name) || "Name";
+      const targetName = ACTIVE_FIELDS.name || "Name";
       const raw = getCleanAttrText(attrs, targetName);
       if (!raw) return "";
       // Strip leading index + dot/whitespace (e.g. "1. UN-009", "35. MO-056" -> "UN-009", "MO-056")
@@ -1887,12 +1967,16 @@
       const pointCode = getCleanPointCode(activeFeature?.attributes);
       const district = getCleanAttrText(
         activeFeature?.attributes,
-        (typeof FIELDS !== "undefined" && FIELDS.district) || "district"
+        ACTIVE_FIELDS.district || "district"
       );
       const streetName = getCleanAttrText(
         activeFeature?.attributes,
-        (typeof FIELDS !== "undefined" && FIELDS.streetName) || "street_name"
+        ACTIVE_FIELDS.streetName || "street_name"
       );
+      const execStage = IS_EXEC_MODE
+        ? els.fieldExecStage?.value?.trim() ||
+          getCleanAttrText(activeFeature?.attributes, ACTIVE_FIELDS.stage || "stage")
+        : "";
 
       const lines = [timestamp];
       if (coordsLine) {
@@ -1909,6 +1993,12 @@
         );
       } else if (includeOrder && orderNum !== undefined && orderNum !== null) {
         lines.push(`Stop #${orderNum}`);
+      }
+
+      if (execStage) {
+        lines.push(
+          /[\u0600-\u06FF]/.test(execStage) ? `المرحلة: ${execStage}` : `Stage: ${execStage}`
+        );
       }
 
       if (district) {
@@ -2135,7 +2225,7 @@
     // --- Offline Outbox Persistence & Sync Engine (Upload All / One-by-One) ---
     function getOutboxItemIdForOid(oid) {
       if (!OfflineDB) return `oid_${oid}`;
-      return OfflineDB.makeOutboxId(resolvedPointsServiceUrl || POINTS_LAYER_URL, oid);
+      return OfflineDB.makeOutboxId(resolvedPointsServiceUrl || ACTIVE_POINTS_URL, oid);
     }
 
     async function saveSubmissionToOutbox(feature, attributesPayload, options = {}) {
@@ -2147,19 +2237,14 @@
       const attrs = feature.attributes || {};
       const orderVal = getStopOrderValue(attrs) ?? "--";
       const pointCode = getCleanPointCode(attrs);
-      const district = getCleanAttrText(
-        attrs,
-        (typeof FIELDS !== "undefined" && FIELDS.district) || "district"
-      );
-      const streetName = getCleanAttrText(
-        attrs,
-        (typeof FIELDS !== "undefined" && FIELDS.streetName) || "street_name"
-      );
+      const district = getCleanAttrText(attrs, ACTIVE_FIELDS.district || "district");
+      const streetName = getCleanAttrText(attrs, ACTIVE_FIELDS.streetName || "street_name");
 
       const savedRecord = await OfflineDB.saveOrMergeOutboxItem({
         id: getOutboxItemIdForOid(oid),
+        mode: APP_MODE,
         objectId: oid,
-        layerUrl: resolvedPointsServiceUrl || POINTS_LAYER_URL,
+        layerUrl: resolvedPointsServiceUrl || ACTIVE_POINTS_URL,
         orderVal,
         pointCode,
         district,
@@ -2219,7 +2304,7 @@
         return;
       }
 
-      cachedOutboxItems = await OfflineDB.getAllOutbox().catch(() => []);
+      cachedOutboxItems = await getModeOutboxItems();
       const count = cachedOutboxItems.length;
 
       if (els.outboxPillBtn && els.outboxCountText) {
@@ -2261,8 +2346,10 @@
         els.btnSyncAll.disabled = !navigator.onLine;
       }
 
-      const decisionField = resolveLayerFieldName(
-        FIELDS.committeeDecision || "committee_decision"
+      const summaryField = resolveLayerFieldName(
+        IS_EXEC_MODE
+          ? ACTIVE_FIELDS.stage || "stage"
+          : ACTIVE_FIELDS.committeeDecision || "committee_decision"
       );
 
       cachedOutboxItems.forEach((item) => {
@@ -2290,15 +2377,16 @@
 
         const meta = document.createElement("div");
         meta.className = "outbox-card-meta";
-        const decisionText =
-          item.attributes?.[decisionField] ||
+        const summaryText =
+          item.attributes?.[summaryField] ||
+          item.attributes?.stage ||
           item.attributes?.committee_decision ||
           "تحديث بيانات";
         const photoCount = Array.isArray(item.photos) ? item.photos.length : 0;
         const delCount = Array.isArray(item.deleteAttachmentIds)
           ? item.deleteAttachmentIds.length
           : 0;
-        const parts = [decisionText];
+        const parts = [summaryText];
         if (photoCount > 0) parts.push(`📷 ${photoCount} صورة`);
         if (delCount > 0) parts.push(`🗑️ حذف ${delCount}`);
         if (item.district) parts.push(item.district);
@@ -2517,7 +2605,7 @@
 
     async function uploadAllOutboxItems() {
       if (isSyncingOutbox || !OfflineDB) return;
-      const queue = await OfflineDB.getAllOutbox().catch(() => []);
+      const queue = await getModeOutboxItems();
       if (queue.length === 0) return;
 
       setOutboxSyncingState(true);
@@ -2590,54 +2678,78 @@
 
       hideFormError();
 
-      const committeeDecision = els.fieldCommitteeDecision.value;
-      const hasBase = els.fieldHasBase.value;
-      const notesObstacles = els.fieldNotesObstacles.value.trim();
+      const oidField = pointsLayer.objectIdField || "OBJECTID";
+      const oid = activeFeature.attributes[oidField];
+      const dateField = resolveLayerFieldName(
+        ACTIVE_FIELDS.actualHandoverDate || "actual_handover_date"
+      );
+      const statusField = activeStatusField || ACTIVE_FIELDS.status || "status";
 
-      if (!committeeDecision) {
-        showFormError("يرجى اختيار قرار لجنة التسليم.");
-        els.fieldCommitteeDecision.focus();
-        return;
-      }
+      let attributesPayload;
 
-      if (!hasBase) {
-        showFormError("يرجى تحديد ما إذا كان يوجد قاعدة بالموقع أم لا.");
-        els.fieldHasBase.focus();
-        return;
-      }
+      if (IS_EXEC_MODE) {
+        const execStage = els.fieldExecStage?.value || "";
+        const execNotes = (els.fieldExecNotes?.value || "").trim();
 
-      if (DECISIONS_REQUIRING_NOTES.has(committeeDecision) && !notesObstacles) {
-        showFormError("يرجى إدخال الملاحظات / المعوقات لأن قرار اللجنة يتطلب توضيحها.");
-        els.fieldNotesObstacles.focus();
-        return;
+        if (!execStage) {
+          showFormError("يرجى اختيار مرحلة التنفيذ.");
+          els.fieldExecStage?.focus();
+          return;
+        }
+
+        const stageField = resolveLayerFieldName(ACTIVE_FIELDS.stage || "stage");
+        const notesField = resolveLayerFieldName(ACTIVE_FIELDS.notes || "notes");
+
+        attributesPayload = {
+          [dateField]: Date.now(),
+          [stageField]: execStage,
+          [notesField]: execNotes,
+          [statusField]: STATUS_VALUES.completed
+        };
+      } else {
+        const committeeDecision = els.fieldCommitteeDecision?.value || "";
+        const hasBase = els.fieldHasBase?.value || "";
+        const notesObstacles = (els.fieldNotesObstacles?.value || "").trim();
+
+        if (!committeeDecision) {
+          showFormError("يرجى اختيار قرار لجنة التسليم.");
+          els.fieldCommitteeDecision?.focus();
+          return;
+        }
+
+        if (!hasBase) {
+          showFormError("يرجى تحديد ما إذا كان يوجد قاعدة بالموقع أم لا.");
+          els.fieldHasBase?.focus();
+          return;
+        }
+
+        if (DECISIONS_REQUIRING_NOTES.has(committeeDecision) && !notesObstacles) {
+          showFormError("يرجى إدخال الملاحظات / المعوقات لأن قرار اللجنة يتطلب توضيحها.");
+          els.fieldNotesObstacles?.focus();
+          return;
+        }
+
+        const decisionField = resolveLayerFieldName(
+          ACTIVE_FIELDS.committeeDecision || "committee_decision"
+        );
+        const hasBaseField = resolveLayerFieldName(ACTIVE_FIELDS.hasBase || "has_base");
+        const notesField = resolveLayerFieldName(
+          ACTIVE_FIELDS.notesObstacles || "notes_obstacles"
+        );
+
+        attributesPayload = {
+          [dateField]: Date.now(),
+          [decisionField]: committeeDecision,
+          [hasBaseField]: hasBase,
+          [notesField]: notesObstacles,
+          [statusField]: STATUS_VALUES.completed
+        };
       }
 
       const wasAlreadyCompleted = isCompletedStatus(
         getStopStatusValue(activeFeature.attributes)
       );
       setSubmittingState(true, "جاري حفظ البيانات...");
-
-      const oidField = pointsLayer.objectIdField || "OBJECTID";
-      const oid = activeFeature.attributes[oidField];
-      const dateField = resolveLayerFieldName(
-        FIELDS.actualHandoverDate || "actual_handover_date"
-      );
-      const decisionField = resolveLayerFieldName(
-        FIELDS.committeeDecision || "committee_decision"
-      );
-      const hasBaseField = resolveLayerFieldName(FIELDS.hasBase || "has_base");
-      const notesField = resolveLayerFieldName(
-        FIELDS.notesObstacles || "notes_obstacles"
-      );
-      const statusField = activeStatusField || FIELDS.status || "status";
-
-      const attributesPayload = {
-        [dateField]: Date.now(),
-        [decisionField]: committeeDecision,
-        [hasBaseField]: hasBase,
-        [notesField]: notesObstacles,
-        [statusField]: STATUS_VALUES.completed
-      };
 
       // If completely offline (or running from cached layer), queue straight to IndexedDB Outbox
       if (!isDemoMode && (isOfflineCacheMode || !navigator.onLine)) {
@@ -2835,7 +2947,7 @@
         showToast("🌐 عاد الاتصال بالإنترنت", "info", 2500);
       }
 
-      if (isOfflineCacheMode && POINTS_LAYER_URL && POINTS_LAYER_URL.trim() !== "") {
+      if (isOfflineCacheMode && ACTIVE_POINTS_URL && ACTIVE_POINTS_URL.trim() !== "") {
         upgradeOfflineLayerToLive().catch(() => {});
       }
     });
@@ -2854,9 +2966,11 @@
     // --- Startup Check ---
     loadWatermarkLogos().catch(() => {});
     refreshOutboxUI().catch(() => {});
-    if (POINTS_LAYER_URL && POINTS_LAYER_URL.trim() !== "") {
+    const isDemoRequested = new URLSearchParams(location.search).get("demo") === "1";
+
+    if (ACTIVE_POINTS_URL && ACTIVE_POINTS_URL.trim() !== "") {
       initializeLayers(false);
-    } else {
+    } else if (isDemoRequested && els.setupModal) {
       els.setupModal.hidden = false;
       els.progressText.textContent = "بانتظار إعداد رابط الطبقة";
 
@@ -2864,6 +2978,22 @@
         els.setupModal.hidden = true;
         initializeLayers(true);
       });
+    } else {
+      // Clear stale offline layer cache when this mode is intentionally empty (no points)
+      if (OfflineDB?.deleteLayerCache) {
+        OfflineDB.deleteLayerCache(POINTS_CACHE_KEY).catch(() => {});
+        OfflineDB.deleteLayerCache(ROUTE_CACHE_KEY).catch(() => {});
+        if (!IS_EXEC_MODE) {
+          OfflineDB.deleteLayerCache("points_cache").catch(() => {});
+          OfflineDB.deleteLayerCache("route_cache").catch(() => {});
+        }
+      }
+      els.progressText.textContent = IS_EXEC_MODE
+        ? "لا توجد نقاط تنفيذ متاحة حالياً"
+        : "لا توجد نقاط استلام متاحة حالياً";
+      els.progressPercent.textContent = "0%";
+      els.progressFill.style.width = "0%";
+      updateOnlineStatusUI();
     }
   });
 })();

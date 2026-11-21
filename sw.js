@@ -2,14 +2,16 @@
  * SERVICE WORKER (App Shell + ArcGIS Runtime + Map Tile Offline Cache)
  * ========================================================================= */
 
-const SHELL_CACHE = "field-app-shell-v1";
-const ARCGIS_CACHE = "field-app-arcgis-v1";
-const TILES_CACHE = "field-app-tiles-v1";
+const SHELL_CACHE = "field-app-shell-v2";
+const ARCGIS_CACHE = "field-app-arcgis-v2";
+const TILES_CACHE = "field-app-tiles-v2";
 const MAX_CACHED_TILES = 350;
 
 const APP_SHELL_URLS = [
   "/app/",
   "/app/index.html",
+  "/exec/",
+  "/exec/index.html",
   "/css/style.css",
   "/js/config.js",
   "/js/offline-db.js",
@@ -85,6 +87,9 @@ function isLocalShellAsset(url) {
     url.pathname === "/app" ||
     url.pathname === "/app/" ||
     url.pathname === "/app/index.html" ||
+    url.pathname === "/exec" ||
+    url.pathname === "/exec/" ||
+    url.pathname === "/exec/index.html" ||
     url.pathname.startsWith("/css/") ||
     url.pathname.startsWith("/js/") ||
     url.pathname.startsWith("/assets/")
@@ -150,8 +155,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (isLocalShellAsset(url)) {
-    const fallbacks =
-      request.mode === "navigate" ? ["/app/", "/app/index.html"] : [];
+    let fallbacks = [];
+    if (request.mode === "navigate") {
+      fallbacks = url.pathname.startsWith("/exec")
+        ? ["/exec/", "/exec/index.html"]
+        : ["/app/", "/app/index.html"];
+    }
     event.respondWith(networkFirst(request, SHELL_CACHE, fallbacks));
     return;
   }

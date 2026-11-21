@@ -130,6 +130,7 @@
 
     const record = {
       id,
+      mode: itemInput.mode || existing?.mode || "handover",
       objectId: itemInput.objectId,
       layerUrl: itemInput.layerUrl || "",
       orderVal: itemInput.orderVal ?? "--",
@@ -187,6 +188,11 @@
     return runTx(STORE_CACHE, "readonly", (store) => store.get(key));
   }
 
+  async function deleteLayerCache(key) {
+    if (!isSupported()) return;
+    await runTx(STORE_CACHE, "readwrite", (store) => store.delete(key));
+  }
+
   global.FieldOfflineDB = {
     isSupported,
     makeOutboxId,
@@ -196,6 +202,7 @@
     getAllOutbox,
     deleteOutboxItem,
     saveLayerCache,
-    getLayerCache
+    getLayerCache,
+    deleteLayerCache
   };
 })(window);

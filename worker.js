@@ -329,11 +329,18 @@ export default {
       }
     }
 
-    // Normalize /app -> /app/
+    // Normalize /app -> /app/ and /exec -> /exec/
     if (pathname === "/app") {
       return new Response(null, {
         status: 302,
         headers: { Location: "/app/" }
+      });
+    }
+
+    if (pathname === "/exec") {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "/exec/" }
       });
     }
 
@@ -373,19 +380,23 @@ export default {
       pathname === "/favicon.ico" ||
       pathname.startsWith("/assets/");
 
-    // Redirect unauthenticated users to login page (/)
+    // Redirect unauthenticated users to login page (/), preserving /exec/ destination if requested
     if (!user && !isPublicAsset) {
+      const loginTarget = pathname.startsWith("/exec") ? "/?next=/exec/" : "/";
       return new Response(null, {
         status: 302,
-        headers: { Location: "/" }
+        headers: { Location: loginTarget }
       });
     }
 
-    // Redirect already-authenticated users from login (/) to the map app (/app/)
+    // Redirect already-authenticated users from login (/) to target mode (/exec/ or /app/)
     if (user && (pathname === "/" || pathname === "/index.html")) {
+      const nextParam = url.searchParams.get("next");
+      const safeTarget =
+        nextParam === "/exec/" || nextParam === "/app/" ? nextParam : "/app/";
       return new Response(null, {
         status: 302,
-        headers: { Location: "/app/" }
+        headers: { Location: safeTarget }
       });
     }
 

@@ -26,12 +26,29 @@
     }
   } catch (err) {}
 
+  // Allow safe internal post-login destinations only
+  function getPostLoginTarget() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      if (IS_LOCAL_FILE) {
+        return next === "exec" || next === "/exec/"
+          ? "exec/index.html"
+          : "app/index.html";
+      }
+      if (next === "/exec/" || next === "/app/") {
+        return next;
+      }
+    } catch (err) {}
+    return IS_LOCAL_FILE ? "app/index.html" : "/app/";
+  }
+
   // Redirect automatically if session is already valid
   async function checkExistingSession() {
     if (IS_LOCAL_FILE) {
       try {
         if (sessionStorage.getItem(LOCAL_AUTH_KEY)) {
-          window.location.replace("app/index.html");
+          window.location.replace(getPostLoginTarget());
         }
       } catch (err) {}
       return;
@@ -41,7 +58,7 @@
       if (res.ok) {
         const data = await res.json();
         if (data && data.authenticated) {
-          window.location.replace("/app/");
+          window.location.replace(getPostLoginTarget());
         }
       }
     } catch (err) {}
@@ -101,7 +118,7 @@
         }
         sessionStorage.setItem(LOCAL_AUTH_KEY, username);
       } catch (err) {}
-      window.location.href = "app/index.html";
+        window.location.href = getPostLoginTarget();
       return;
     }
 
@@ -128,7 +145,7 @@
           }
         } catch (err) {}
 
-        window.location.replace("/app/");
+        window.location.replace(getPostLoginTarget());
         return;
       }
 
