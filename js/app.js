@@ -1379,15 +1379,188 @@
       return null;
     }
 
+    let cachedLogosImage = null;
+
     function formatWatermarkTimestamp(date) {
+      const MONTHS = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      ];
       const pad = (n) => String(n).padStart(2, "0");
-      const yyyy = date.getFullYear();
-      const mm = pad(date.getMonth() + 1);
       const dd = pad(date.getDate());
+      const mmm = MONTHS[date.getMonth()];
+      const yyyy = date.getFullYear();
       const hh = pad(date.getHours());
       const min = pad(date.getMinutes());
       const sec = pad(date.getSeconds());
-      return `${yyyy}-${mm}-${dd}  ${hh}:${min}:${sec}`;
+      return `${dd} ${mmm} ${yyyy} ${hh}:${min}:${sec}`;
+    }
+
+    function formatWatermarkCoords(location) {
+      if (
+        !location ||
+        typeof location.lat !== "number" ||
+        typeof location.lng !== "number" ||
+        !Number.isFinite(location.lat) ||
+        !Number.isFinite(location.lng)
+      ) {
+        return null;
+      }
+      const latHem = location.lat >= 0 ? "N" : "S";
+      const lngHem = location.lng >= 0 ? "E" : "W";
+      return `${Math.abs(location.lat).toFixed(8)}${latHem} ${Math.abs(location.lng).toFixed(8)}${lngHem}`;
+    }
+
+    function loadImageSafe(src, useCors = false, timeoutMs = 3500) {
+      return new Promise((resolve) => {
+        if (!src) {
+          resolve(null);
+          return;
+        }
+        let settled = false;
+        const img = new Image();
+        if (useCors) {
+          img.crossOrigin = "anonymous";
+        }
+
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            resolve(null);
+          }
+        }, timeoutMs);
+
+        img.onload = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(img);
+          }
+        };
+
+        img.onerror = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(null);
+          }
+        };
+
+        img.src = src;
+      });
+    }
+
+    async function loadWatermarkLogos() {
+      if (cachedLogosImage && cachedLogosImage.complete && cachedLogosImage.naturalWidth > 0) {
+        return cachedLogosImage;
+      }
+      const img = await loadImageSafe("../assets/logos.jpg", false, 3000);
+      if (img && img.naturalWidth > 0) {
+        cachedLogosImage = img;
+        return img;
+      }
+      return null;
+    }
+
+    async function renderSatelliteMinimapSnapshot(lat, lng, snapSize = 440) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+      const zoom = 17;
+      const scaleFactor = 1.25;
+      const n = Math.pow(2, zoom);
+      const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+      const latRad = (clampedLat * Math.PI) / 180;
+      const xFloat = ((lng + 180) / 360) * n;
+      const yFloat =
+        ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+      const renderTilePx = 256 * scaleFactor;
+      const centerPxX = xFloat * renderTilePx;
+      const centerPxY = yFloat * renderTilePx;
+
+      const topLeftWorldX = centerPxX - snapSize / 2;
+      const topLeftWorldY = centerPxY - snapSize / 2;
+
+      const minTileX = Math.floor(topLeftWorldX / renderTilePx);
+      const maxTileX = Math.floor((topLeftWorldX + snapSize) / renderTilePx);
+      const minTileY = Math.floor(topLeftWorldY / renderTilePx);
+      const maxTileY = Math.floor((topLeftWorldY + snapSize) / renderTilePx);
+
+      const tileJobs = [];
+      for (let ty = minTileY; ty <= maxTileY; ty++) {
+        if (ty < 0 || ty >= n) continue;
+        for (let tx = minTileX; tx <= maxTileX; tx++) {
+          const wrappedX = ((tx % n) + n) % n;
+          const tileUrl = `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${wrappedX}`;
+          tileJobs.push(
+            loadImageSafe(tileUrl, true, 3500).then((img) => ({
+              img,
+              tx,
+              ty
+            }))
+          );
+        }
+      }
+
+      const loadedTiles = await Promise.all(tileJobs);
+      const validTiles = loadedTiles.filter((t) => t.img && t.img.naturalWidth > 0);
+      if (validTiles.length === 0) return null;
+
+      const snapCanvas = document.createElement("canvas");
+      snapCanvas.width = snapSize;
+      snapCanvas.height = snapSize;
+      const snapCtx = snapCanvas.getContext("2d");
+      snapCtx.fillStyle = "#1e293b";
+      snapCtx.fillRect(0, 0, snapSize, snapSize);
+
+      validTiles.forEach(({ img, tx, ty }) => {
+        const destX = tx * renderTilePx - topLeftWorldX;
+        const destY = ty * renderTilePx - topLeftWorldY;
+        snapCtx.drawImage(img, destX, destY, renderTilePx, renderTilePx);
+      });
+
+      return snapCanvas;
+    }
+
+    function drawRedMapPin(ctx, tipX, tipY, pinHeight) {
+      const r = pinHeight * 0.34;
+      const circleY = tipY - pinHeight + r;
+
+      ctx.save();
+      // Subtle ground shadow
+      ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
+      ctx.beginPath();
+      ctx.ellipse(tipX, tipY + 1, r * 0.55, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Teardrop marker body
+      ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = "#ea4335";
+      ctx.strokeStyle = "#b31412";
+      ctx.lineWidth = Math.max(1.5, pinHeight * 0.045);
+
+      ctx.beginPath();
+      ctx.arc(tipX, circleY, r, Math.PI * 0.82, Math.PI * 0.18, false);
+      ctx.quadraticCurveTo(tipX + r * 0.45, circleY + r * 1.15, tipX, tipY);
+      ctx.quadraticCurveTo(
+        tipX - r * 0.45,
+        circleY + r * 1.15,
+        tipX - r * Math.cos(Math.PI * 0.18),
+        circleY + r * Math.sin(Math.PI * 0.18)
+      );
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.stroke();
+
+      // Inner dark dot
+      ctx.fillStyle = "#7f1d1d";
+      ctx.beginPath();
+      ctx.arc(tipX, circleY, r * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     function getCleanPointCode(attrs) {
@@ -1409,75 +1582,169 @@
     }
 
     async function buildWatermarkInfo() {
-      const location = await resolvePhotoLocation();
+      const locationPromise = resolvePhotoLocation();
+      const logosPromise = loadWatermarkLogos();
+      const [location, logosImg] = await Promise.all([locationPromise, logosPromise]);
+
       const timestamp = formatWatermarkTimestamp(new Date());
+      const coordsLine = formatWatermarkCoords(location);
       const includeOrder =
         typeof IMAGE_WATERMARK === "undefined" || IMAGE_WATERMARK.includePointOrder;
       const orderNum = getStopOrderValue(activeFeature?.attributes);
       const pointCode = getCleanPointCode(activeFeature?.attributes);
 
-      const lines = [];
-      if (pointCode) {
-        if (includeOrder && orderNum !== undefined && orderNum !== null) {
-          lines.push(`${pointCode}  |  Stop #${orderNum}`);
-        } else {
-          lines.push(pointCode);
-        }
-        lines.push(timestamp);
-      } else if (includeOrder && orderNum !== undefined && orderNum !== null) {
-        lines.push(`Stop #${orderNum}  |  ${timestamp}`);
-      } else {
-        lines.push(timestamp);
-      }
-
-      if (location) {
-        const latStr = location.lat.toFixed(6);
-        const lngStr = location.lng.toFixed(6);
-        const accStr =
-          typeof location.accuracy === "number" && location.accuracy > 0
-            ? ` (±${location.accuracy}m)`
-            : "";
-        lines.push(`${location.source}: ${latStr}, ${lngStr}${accStr}`);
+      const lines = [timestamp];
+      if (coordsLine) {
+        lines.push(coordsLine);
       } else {
         lines.push("Location: Unavailable");
       }
 
-      return lines;
+      if (pointCode) {
+        lines.push(
+          includeOrder && orderNum !== undefined && orderNum !== null
+            ? `${pointCode}  (#${orderNum})`
+            : pointCode
+        );
+      } else if (includeOrder && orderNum !== undefined && orderNum !== null) {
+        lines.push(`Stop #${orderNum}`);
+      }
+
+      const minimapCanvas = location
+        ? await renderSatelliteMinimapSnapshot(location.lat, location.lng, 440)
+        : null;
+
+      return {
+        lines,
+        location,
+        logosImg,
+        minimapCanvas
+      };
     }
 
-    function drawPhotoWatermark(ctx, width, height, lines) {
-      if (!Array.isArray(lines) || lines.length === 0) return;
+    function drawPhotoWatermark(ctx, width, height, watermarkData) {
+      if (!watermarkData) return;
+      const lines = Array.isArray(watermarkData)
+        ? watermarkData
+        : watermarkData.lines || [];
+      const logosImg = !Array.isArray(watermarkData) ? watermarkData.logosImg : null;
+      const minimapCanvas = !Array.isArray(watermarkData) ? watermarkData.minimapCanvas : null;
+      const location = !Array.isArray(watermarkData) ? watermarkData.location : null;
 
-      const fontSize = Math.max(15, Math.round(width * 0.025));
-      const lineHeight = Math.round(fontSize * 1.42);
-      const padX = Math.max(14, Math.round(width * 0.022));
-      const padY = Math.max(10, Math.round(fontSize * 0.65));
-      const bannerHeight = lines.length * lineHeight + padY * 2;
+      // 1. Measure Top-Right White Logos Box
+      let logoBoxW = 0;
+      let logoBoxH = 0;
+      let logoPad = 0;
+      let logoInnerW = 0;
+      let logoInnerH = 0;
+      if (logosImg && logosImg.naturalWidth > 0 && logosImg.naturalHeight > 0) {
+        logoBoxW = Math.round(Math.min(width * 0.38, Math.max(210, width * 0.35)));
+        logoPad = Math.max(4, Math.round(logoBoxW * 0.025));
+        logoInnerW = logoBoxW - logoPad * 2;
+        logoInnerH = Math.round(
+          logoInnerW * (logosImg.naturalHeight / logosImg.naturalWidth)
+        );
+        logoBoxH = logoInnerH + logoPad * 2;
+      }
 
+      // 2. Measure Top-Left Text (Date/Time + Coordinates + Code)
+      const padX = Math.max(12, Math.round(width * 0.018));
+      const padY = Math.max(10, Math.round(width * 0.015));
+      const maxTextW = Math.max(120, (logoBoxW > 0 ? width - logoBoxW : width) - padX * 2);
+
+      let fontSize = Math.max(15, Math.round(width * 0.029));
       ctx.save();
       ctx.direction = "ltr";
-      ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
 
-      // Semi-transparent dark bottom banner for guaranteed legibility on bright/dark photos
-      const grad = ctx.createLinearGradient(0, height - bannerHeight - 16, 0, height);
-      grad.addColorStop(0, "rgba(15, 23, 42, 0)");
-      grad.addColorStop(0.25, "rgba(15, 23, 42, 0.72)");
-      grad.addColorStop(1, "rgba(15, 23, 42, 0.88)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, height - bannerHeight - 16, width, bannerHeight + 16);
+      if (lines.length > 0) {
+        ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
+        let widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
+        while (widest > maxTextW && fontSize > 12) {
+          fontSize -= 1;
+          ctx.font = `700 ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
+          widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
+        }
+      }
 
-      ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+      const lineHeight = Math.round(fontSize * 1.28);
+      const textBlockHeight = lines.length * lineHeight;
+      const topShadeHeight = Math.max(logoBoxH, padY * 2 + textBlockHeight) + 22;
+
+      // Subtle dark top gradient behind timestamp/coords so text stays legible on bright backgrounds
+      const topGrad = ctx.createLinearGradient(0, 0, 0, topShadeHeight);
+      topGrad.addColorStop(0, "rgba(0, 0, 0, 0.72)");
+      topGrad.addColorStop(0.65, "rgba(0, 0, 0, 0.35)");
+      topGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = topGrad;
+      ctx.fillRect(0, 0, width, topShadeHeight);
+
+      // Draw Top-Left White Text Lines
+      ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
       ctx.shadowBlur = 4;
       ctx.shadowOffsetY = 1;
       ctx.fillStyle = "#ffffff";
-
-      const startY = height - bannerHeight + padY;
       lines.forEach((line, idx) => {
-        ctx.fillText(line, padX, startY + idx * lineHeight);
+        ctx.fillText(line, padX, padY + idx * lineHeight);
       });
       ctx.restore();
+
+      // 3. Draw Top-Right White Logo Strip Flush to Corner
+      if (logosImg && logoBoxW > 0 && logoBoxH > 0) {
+        const logoBoxX = width - logoBoxW;
+        ctx.save();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(logoBoxX, 0, logoBoxW, logoBoxH);
+        ctx.drawImage(logosImg, logoBoxX + logoPad, logoPad, logoInnerW, logoInnerH);
+        ctx.restore();
+      }
+
+      // 4. Draw Bottom-Left Satellite Minimap with Red Pin
+      if (location) {
+        const mapW = Math.round(width * 0.32);
+        const mapH = Math.min(Math.round(mapW * 1.05), Math.round(height * 0.31));
+        const mapX = 0;
+        const mapY = height - mapH;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(mapX, mapY, mapW, mapH);
+        ctx.clip();
+
+        if (minimapCanvas && minimapCanvas.width > 0 && minimapCanvas.height > 0) {
+          const snapW = minimapCanvas.width;
+          const snapH = minimapCanvas.height;
+          let srcW = snapW;
+          let srcH = snapH;
+          if (mapW / mapH >= 1) {
+            srcH = Math.round(snapW * (mapH / mapW));
+          } else {
+            srcW = Math.round(snapH * (mapW / mapH));
+          }
+          const sx = Math.max(0, Math.round((snapW - srcW) / 2));
+          const sy = Math.max(0, Math.round((snapH - srcH) / 2));
+          ctx.drawImage(minimapCanvas, sx, sy, srcW, srcH, mapX, mapY, mapW, mapH);
+        } else {
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(mapX, mapY, mapW, mapH);
+        }
+
+        const pinHeight = Math.max(24, Math.round(mapH * 0.24));
+        drawRedMapPin(ctx, mapX + mapW / 2, mapY + mapH / 2, pinHeight);
+        ctx.restore();
+
+        // Subtle crisp frame around exposed edges of minimap
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.lineWidth = Math.max(1.5, Math.round(width * 0.002));
+        ctx.beginPath();
+        ctx.moveTo(mapX, mapY);
+        ctx.lineTo(mapX + mapW, mapY);
+        ctx.lineTo(mapX + mapW, height);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     function processPhotoOnCanvas(file, options) {
@@ -1718,6 +1985,7 @@
     }
 
     // --- Startup Check ---
+    loadWatermarkLogos().catch(() => {});
     if (POINTS_LAYER_URL && POINTS_LAYER_URL.trim() !== "") {
       initializeLayers(false);
     } else {

@@ -358,7 +358,8 @@ export default {
       pathname === "/index.html" ||
       pathname === "/css/login.css" ||
       pathname === "/js/login.js" ||
-      pathname === "/favicon.ico";
+      pathname === "/favicon.ico" ||
+      pathname.startsWith("/assets/");
 
     // Redirect unauthenticated users to login page (/)
     if (!user && !isPublicAsset) {
