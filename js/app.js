@@ -539,17 +539,20 @@
 
         const res = await fetch(metaUrl.toString());
         if (!res.ok) {
-          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+          if (configuredLayerId !== null) return cleanUrl;
+          return preferredGeomType === "esriGeometryPolyline" ? null : `${serviceRoot}/0`;
         }
         const info = await res.json().catch(() => null);
         if (info?.error) {
           console.warn("ArcGIS service metadata error:", serviceRoot, info.error);
-          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+          if (configuredLayerId !== null) return cleanUrl;
+          return preferredGeomType === "esriGeometryPolyline" ? null : `${serviceRoot}/0`;
         }
 
         const layers = Array.isArray(info?.layers) ? info.layers : [];
         if (layers.length === 0) {
-          return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+          if (configuredLayerId !== null) return cleanUrl;
+          return preferredGeomType === "esriGeometryPolyline" ? null : `${serviceRoot}/0`;
         }
 
         const needsSublayerCount =
@@ -581,6 +584,11 @@
           return pool[0].url;
         }
 
+        // If caller passed a bare /FeatureServer URL for route and the service has no polyline sublayer, skip route cleanly
+        if (configuredLayerId === null && preferredGeomType === "esriGeometryPolyline") {
+          return null;
+        }
+
         const existingConfigured =
           configuredLayerId !== null
             ? detailedLayers.find((l) => Number(l.id) === configuredLayerId)
@@ -588,7 +596,8 @@
         return (existingConfigured || detailedLayers[0]).url;
       } catch (err) {
         console.warn("Service metadata inspection skipped for", cleanUrl, err);
-        return configuredLayerId !== null ? cleanUrl : `${serviceRoot}/0`;
+        if (configuredLayerId !== null) return cleanUrl;
+        return preferredGeomType === "esriGeometryPolyline" ? null : `${serviceRoot}/0`;
       }
     }
 
@@ -628,8 +637,10 @@
             symbol: getRouteLineSymbol()
           })
         });
-      } else {
+      } else if (!ROUTE_LAYER_URL || ROUTE_LAYER_URL.trim() === "") {
         routeLayer = new GraphicsLayer({ id: "auto-route-layer", opacity: 0.8 });
+      } else {
+        routeLayer = null;
       }
 
       if (useDemo) {
@@ -645,7 +656,7 @@
         });
       }
 
-      map.addMany([routeLayer, pointsLayer]);
+      map.addMany([routeLayer, pointsLayer].filter(Boolean));
 
       if (routeLayer && routeLayer.type === "feature") {
         routeLayer
