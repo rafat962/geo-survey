@@ -2,9 +2,11 @@
  * CONFIGURATION SECTION (قم بتعديل الروابط وأسماء الحقول هنا)
  * ========================================================================= */
 
-// --- 1. إعدادات موديل تسليم المواقع (/app/) — فارغ حالياً بدون بيانات ---
-const POINTS_LAYER_URL = "";
-const ROUTE_LAYER_URL = "";
+// --- 1. إعدادات موديل تسليم المواقع (/app/) ---
+const POINTS_LAYER_URL =
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Makkah_22_11_2026/FeatureServer";
+const ROUTE_LAYER_URL =
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Makkah_22_11_2026/FeatureServer";
 
 // ربط أسماء الحقول الفعلية في طبقة التسليم
 const FIELDS = {
