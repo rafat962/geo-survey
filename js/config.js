@@ -4,9 +4,9 @@
 
 // --- 1. إعدادات موديل تسليم المواقع (/app/) ---
 const POINTS_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Makkah_22_11_2026/FeatureServer";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Maakkah_22_11_2026/FeatureServer";
 const ROUTE_LAYER_URL =
-  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Makkah_22_11_2026/FeatureServer";
+  "https://services-ap1.arcgis.com/HRZVvitYCIwFb7oA/arcgis/rest/services/Maakkah_22_11_2026/FeatureServer";
 
 // ربط أسماء الحقول الفعلية في طبقة التسليم
 const FIELDS = {
